@@ -9,9 +9,6 @@ let nearbyUsers = [];
 let locationWatchId = null;
 let currentRoomCode = null;
 let isInPrivateRoom = false;
-let messageHistory = []; // 메시지 히스토리 저장
-let isInDirectMessage = false; // 1대1 메시지 모드
-let directMessageTarget = null; // 1대1 메시지 대상
 
 // DOM 요소들
 const loginScreen = document.getElementById('loginScreen');
@@ -46,11 +43,7 @@ const joinRoomBtn = document.getElementById('joinRoomBtn');
 const closeCreateModalBtn = document.getElementById('closeCreateModalBtn');
 const closeJoinModalBtn = document.getElementById('closeJoinModalBtn');
 
-// 1대1 메시지 관련 DOM 요소들
-const directMessagesBtn = document.getElementById('directMessagesBtn');
-const directMessagesModal = document.getElementById('directMessagesModal');
-const directMessagesList = document.getElementById('directMessagesList');
-const closeDirectMessagesModalBtn = document.getElementById('closeDirectMessagesModalBtn');
+
 
 // 초기화
 document.addEventListener('DOMContentLoaded', () => {
@@ -59,59 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
     getCurrentLocation();
 });
 
-// 로그인 상태 저장/복원 함수들
-function saveLoginState(username, latitude, longitude) {
-    const loginData = {
-        username: username,
-        latitude: latitude,
-        longitude: longitude,
-        timestamp: new Date().getTime()
-    };
-    localStorage.setItem('gpsChatLogin', JSON.stringify(loginData));
-}
 
-// 메시지 히스토리 저장
-function saveMessageHistory(messages) {
-    localStorage.setItem('gpsChatMessages', JSON.stringify(messages));
-}
-
-// 메시지 히스토리 복원
-function loadMessageHistory() {
-    const savedMessages = localStorage.getItem('gpsChatMessages');
-    if (savedMessages) {
-        try {
-            return JSON.parse(savedMessages);
-        } catch (error) {
-            localStorage.removeItem('gpsChatMessages');
-        }
-    }
-    return [];
-}
-
-function loadLoginState() {
-    const savedData = localStorage.getItem('gpsChatLogin');
-    if (savedData) {
-        try {
-            const loginData = JSON.parse(savedData);
-            const now = new Date().getTime();
-            const ONE_DAY = 24 * 60 * 60 * 1000; // 24시간
-            
-            // 24시간 이내의 로그인 데이터만 유효
-            if (now - loginData.timestamp < ONE_DAY) {
-                return loginData;
-            } else {
-                localStorage.removeItem('gpsChatLogin');
-            }
-        } catch (error) {
-            localStorage.removeItem('gpsChatLogin');
-        }
-    }
-    return null;
-}
-
-function clearLoginState() {
-    localStorage.removeItem('gpsChatLogin');
-}
 
 // 앱 초기화
 function initializeApp() {
@@ -120,35 +61,6 @@ function initializeApp() {
     
     // Socket 이벤트 리스너 설정
     setupSocketListeners();
-    
-    // 저장된 로그인 상태 확인
-    const savedLogin = loadLoginState();
-    if (savedLogin) {
-        // 자동 로그인
-        currentUser.username = savedLogin.username;
-        currentUser.latitude = savedLogin.latitude;
-        currentUser.longitude = savedLogin.longitude;
-        
-        // UI 업데이트
-        usernameInput.value = savedLogin.username;
-        currentUsername.textContent = savedLogin.username;
-        updateLocationText(savedLogin.latitude, savedLogin.longitude);
-        
-        // 채팅 화면으로 이동
-        showScreen(chatScreen);
-        
-        // 서버에 사용자 등록
-        socket.emit('register', {
-            username: savedLogin.username,
-            latitude: savedLogin.latitude,
-            longitude: savedLogin.longitude
-        });
-        
-        // 메시지 히스토리 복원
-        restoreMessageHistory();
-        
-        showToast('자동 로그인되었습니다.', 'success');
-    }
     
     // 사용자 이름 입력 필드 이벤트
     usernameInput.addEventListener('input', validateForm);
@@ -166,16 +78,13 @@ function setupEventListeners() {
     
     // 뒤로가기 버튼
     backBtn.addEventListener('click', () => {
-        if (isInDirectMessage) {
-            // 1대1 메시지에서 나가기
-            endDirectMessage();
-        } else if (isInPrivateRoom) {
+        if (isInPrivateRoom) {
             // 프라이빗 방에서 나가기
             leavePrivateRoom();
         } else {
-            // 로그인 화면으로 돌아가기 (로그인 상태는 유지)
+            // 로그인 화면으로 돌아가기
             showScreen(loginScreen);
-            // 로그인 상태는 유지하므로 disconnectFromChat() 호출하지 않음
+            disconnectFromChat();
         }
     });
     
@@ -191,24 +100,14 @@ function setupEventListeners() {
     // 근처 사용자 버튼
     nearbyUsersBtn.addEventListener('click', showNearbyUsersModal);
     
-    // 1대1 메시지 버튼
-    directMessagesBtn.addEventListener('click', showDirectMessagesModal);
-    
     // 위치 새로고침
     refreshLocationBtn.addEventListener('click', refreshLocation);
     
     // 모달 닫기
     closeModalBtn.addEventListener('click', hideNearbyUsersModal);
-    closeDirectMessagesModalBtn.addEventListener('click', hideDirectMessagesModal);
     nearbyUsersModal.addEventListener('click', (e) => {
         if (e.target === nearbyUsersModal) {
             hideNearbyUsersModal();
-        }
-    });
-    
-    directMessagesModal.addEventListener('click', (e) => {
-        if (e.target === directMessagesModal) {
-            hideDirectMessagesModal();
         }
     });
     
@@ -332,19 +231,7 @@ function setupSocketListeners() {
         showToast(error.message, 'error');
     });
 
-    // 1대1 메시지 수신
-    socket.on('newDirectMessage', (messageData) => {
-        console.log('1대1 메시지 수신:', messageData);
-        
-        // 1대1 메시지 모드이고 현재 대상과의 대화인 경우
-        if (isInDirectMessage && directMessageTarget === messageData.senderName) {
-            // 1대1 메시지로 표시
-            addMessage(messageData, messageData.senderName === currentUser.username);
-        } else {
-            // 일반 채팅으로 표시
-            addMessage(messageData, false);
-        }
-    });
+
 }
 
 // 현재 위치 가져오기
@@ -457,8 +344,7 @@ function startChat() {
     
     currentUser.username = username;
     
-    // 로그인 상태 저장
-    saveLoginState(username, currentUser.latitude, currentUser.longitude);
+
     
     // 서버에 사용자 등록
     socket.emit('register', {
@@ -484,8 +370,7 @@ function disconnectFromChat() {
         locationWatchId = null;
     }
     
-    // 로그인 상태 삭제
-    clearLoginState();
+
     
     // 입력 필드 초기화
     usernameInput.value = '';
@@ -515,13 +400,7 @@ function sendMessage() {
         return;
     }
     
-    if (isInDirectMessage && directMessageTarget) {
-        // 1대1 메시지 전송 (실제로는 일반 채팅으로 전송하되, 특정 사용자에게만 표시)
-        socket.emit('sendDirectMessage', { 
-            message: escapeHtml(message), 
-            targetUsername: directMessageTarget 
-        });
-    } else if (isInPrivateRoom && currentRoomCode) {
+    if (isInPrivateRoom && currentRoomCode) {
         // 프라이빗 방 메시지 전송
         socket.emit('sendPrivateMessage', { 
             message: escapeHtml(message), 
@@ -563,22 +442,6 @@ function addMessage(messageData, isSent) {
         return;
     }
     
-    // 메시지 히스토리에 저장
-    const messageToSave = {
-        ...messageData,
-        isSent: isSent,
-        timestamp: messageData.timestamp || new Date().toISOString()
-    };
-    messageHistory.push(messageToSave);
-    
-    // 최근 100개 메시지만 유지
-    if (messageHistory.length > 100) {
-        messageHistory = messageHistory.slice(-100);
-    }
-    
-    // 로컬 스토리지에 저장
-    saveMessageHistory(messageHistory);
-    
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${isSent ? 'sent' : 'received'}`;
     
@@ -587,12 +450,6 @@ function addMessage(messageData, isSent) {
         const senderNameTop = document.createElement('div');
         senderNameTop.className = 'sender-name-top';
         senderNameTop.textContent = escapeHtml(messageData.senderName);
-        // 1대1 메시지가 아닐 때만 클릭 가능
-        if (!isInDirectMessage) {
-            senderNameTop.style.cursor = 'pointer';
-            senderNameTop.title = '클릭하여 1대1 메시지 시작';
-            senderNameTop.addEventListener('click', () => startDirectMessage(messageData.senderName));
-        }
         messageDiv.appendChild(senderNameTop);
     }
     
@@ -655,9 +512,6 @@ function showNearbyUsersModal() {
                     <div class="user-name">${escapeHtml(user.username)}</div>
                     <div class="user-distance">${user.distance}m 거리</div>
                 </div>
-                <button class="btn-direct-message" onclick="startDirectMessage('${escapeHtml(user.username)}')">
-                    <i class="fas fa-comment"></i>
-                </button>
             `;
             
             nearbyUsersList.appendChild(userItem);
@@ -672,58 +526,7 @@ function hideNearbyUsersModal() {
     nearbyUsersModal.classList.remove('active');
 }
 
-// 1대1 메시지 목록 표시
-function showDirectMessagesModal() {
-    // 메시지 히스토리에서 1대1 메시지 상대방 목록 추출
-    const directMessagePartners = new Set();
-    
-    messageHistory.forEach(msg => {
-        if (msg.senderName !== currentUser.username) {
-            directMessagePartners.add(msg.senderName);
-        }
-    });
-    
-    directMessagesList.innerHTML = '';
-    
-    if (directMessagePartners.size === 0) {
-        directMessagesList.innerHTML = '<p style="text-align: center; color: #666;">1대1 메시지 기록이 없습니다.</p>';
-    } else {
-        Array.from(directMessagePartners).forEach(partner => {
-            const partnerItem = document.createElement('div');
-            partnerItem.className = 'user-item';
-            
-            // 해당 상대방과의 최근 메시지 찾기
-            const recentMessages = messageHistory
-                .filter(msg => msg.senderName === partner || 
-                             (msg.senderName === currentUser.username && msg.targetUsername === partner))
-                .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-            
-            const lastMessage = recentMessages[0];
-            const lastMessageText = lastMessage ? 
-                (lastMessage.message.length > 30 ? lastMessage.message.substring(0, 30) + '...' : lastMessage.message) : 
-                '메시지 없음';
-            
-            partnerItem.innerHTML = `
-                <div class="user-info-modal">
-                    <div class="user-name">${escapeHtml(partner)}</div>
-                    <div class="user-distance">${lastMessageText}</div>
-                </div>
-                <button class="btn-direct-message" onclick="startDirectMessage('${escapeHtml(partner)}')">
-                    <i class="fas fa-comment"></i>
-                </button>
-            `;
-            
-            directMessagesList.appendChild(partnerItem);
-        });
-    }
-    
-    directMessagesModal.classList.add('active');
-}
 
-// 1대1 메시지 모달 숨기기
-function hideDirectMessagesModal() {
-    directMessagesModal.classList.remove('active');
-}
 
 // 화면 전환
 function showScreen(screen) {
@@ -765,19 +568,10 @@ function showToast(message, type = 'info') {
     }, 3000);
 }
 
-// 페이지 언로드 시 정리 (탭 닫을 때만 로그인 상태 삭제)
+// 페이지 언로드 시 정리
 window.addEventListener('beforeunload', () => {
     if (locationWatchId) {
         navigator.geolocation.clearWatch(locationWatchId);
-    }
-    
-    // 탭을 닫을 때만 로그인 상태 삭제
-    // 페이지 새로고침이나 뒤로가기 시에는 유지
-    if (performance.navigation.type === 1) { // 새로고침
-        // 로그인 상태 유지
-    } else {
-        // 탭 닫기 시 로그인 상태 삭제
-        clearLoginState();
     }
 });
 
@@ -896,86 +690,7 @@ function updatePrivateRoomStatus() {
     }
 }
 
-// 1대1 메시지 시작
-function startDirectMessage(targetUsername) {
-    if (targetUsername === currentUser.username) {
-        showToast('자신에게는 메시지를 보낼 수 없습니다.', 'error');
-        return;
-    }
-    
-    // 모달들 닫기
-    hideNearbyUsersModal();
-    hideDirectMessagesModal();
-    
-    isInDirectMessage = true;
-    directMessageTarget = targetUsername;
-    
-    // 1대1 메시지 화면으로 변경
-    messagesContainer.innerHTML = `
-        <div class="welcome-message">
-            <i class="fas fa-user"></i>
-            <h3>1대1 메시지</h3>
-            <p><strong>${escapeHtml(targetUsername)}</strong>님과의 1대1 대화</p>
-            <p>메시지를 입력하고 Enter를 누르거나 전송 버튼을 클릭하세요.</p>
-        </div>
-    `;
-    
-    // 헤더에 1대1 메시지 표시
-    updateDirectMessageStatus();
-    
-    showToast(`${targetUsername}님과 1대1 메시지를 시작합니다.`, 'info');
-}
 
-// 1대1 메시지 종료
-function endDirectMessage() {
-    isInDirectMessage = false;
-    directMessageTarget = null;
-    
-    // 일반 채팅 화면으로 복원
-    messagesContainer.innerHTML = `
-        <div class="welcome-message">
-            <i class="fas fa-hand-wave"></i>
-            <h3>환영합니다!</h3>
-            <p>근처 500m 내의 사람들과 대화를 시작하세요.</p>
-            <p>메시지를 입력하고 Enter를 누르거나 전송 버튼을 클릭하세요.</p>
-        </div>
-    `;
-    
-    // 저장된 메시지 히스토리 복원
-    restoreMessageHistory();
-    
-    updateDirectMessageStatus();
-    showToast('일반 채팅으로 돌아왔습니다.', 'info');
-}
-
-// 1대1 메시지 상태 업데이트
-function updateDirectMessageStatus() {
-    const existingIndicator = document.querySelector('.direct-message-indicator');
-    if (existingIndicator) {
-        existingIndicator.remove();
-    }
-    
-    if (isInDirectMessage && directMessageTarget) {
-        const indicator = document.createElement('div');
-        indicator.className = 'direct-message-indicator';
-        indicator.innerHTML = `
-            <i class="fas fa-user"></i>
-            <span>1대1: ${escapeHtml(directMessageTarget)}</span>
-        `;
-        document.querySelector('.user-info').appendChild(indicator);
-    }
-}
-
-// 메시지 히스토리 복원
-function restoreMessageHistory() {
-    const savedHistory = loadMessageHistory();
-    if (savedHistory.length > 0) {
-        messagesContainer.innerHTML = '';
-        savedHistory.forEach(msg => {
-            addMessage(msg, msg.isSent);
-        });
-    }
-}
 
 // 일반 채팅방으로 돌아가기
 function leavePrivateRoom() {
@@ -994,9 +709,6 @@ function leavePrivateRoom() {
                 <p>메시지를 입력하고 Enter를 누르거나 전송 버튼을 클릭하세요.</p>
             </div>
         `;
-        
-        // 저장된 메시지 히스토리 복원
-        restoreMessageHistory();
         
         showToast('일반 채팅방으로 돌아왔습니다.', 'info');
     }

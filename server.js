@@ -298,10 +298,10 @@ io.on('connection', (socket) => {
     socket.emit('nearbyUsers', nearbyUsers);
     console.log(`📋 ${username}에게 ${nearbyUsers.length}명의 근처 사용자 목록 전송`);
     
-    // 새 사용자에게 최근 메시지 5개 전송
+    // 새 사용자에게 최근 메시지 7개 전송
     if (db) {
       db.all(
-        'SELECT * FROM messages WHERE timestamp > datetime("now", "-1 hour") ORDER BY timestamp DESC LIMIT 5',
+        'SELECT * FROM messages WHERE timestamp > datetime("now", "-1 hour") ORDER BY timestamp DESC LIMIT 7',
         (err, rows) => {
           if (err) {
             console.log('최근 메시지 조회 오류:', err.message);
@@ -595,52 +595,7 @@ io.on('connection', (socket) => {
     leavePrivateRoom(socket.id, roomCode);
   });
 
-  // 1대1 메시지 전송
-  socket.on('sendDirectMessage', (data) => {
-    const { message, targetUsername } = data;
-    const user = connectedUsers.get(socket.id);
-    
-    if (!user) {
-      socket.emit('error', { message: '사용자 정보를 찾을 수 없습니다.' });
-      return;
-    }
 
-    // Rate Limiting 검사
-    if (!checkRateLimit(socket.id)) {
-      socket.emit('error', { message: '메시지 전송 속도가 너무 빠릅니다.' });
-      return;
-    }
-
-    // 입력값 검증
-    if (!validateInput(message)) {
-      socket.emit('error', { message: '유효하지 않은 메시지입니다.' });
-      return;
-    }
-
-    console.log(`💬 1대1 메시지: ${user.username} -> ${targetUsername}`);
-    console.log(`📝 내용: ${message}`);
-
-    const messageData = {
-      senderId: socket.id,
-      senderName: user.username,
-      message,
-      targetUsername,
-      timestamp: new Date().toISOString()
-    };
-
-    // 발신자에게 메시지 전송
-    socket.emit('newDirectMessage', messageData);
-
-    // 수신자에게 메시지 전송 (수신자가 온라인인 경우)
-    const targetUser = Array.from(connectedUsers.entries()).find(([id, u]) => u.username === targetUsername);
-    if (targetUser) {
-      io.to(targetUser[0]).emit('newDirectMessage', messageData);
-      console.log(`✅ 1대1 메시지 전송 완료: ${targetUsername}에게 전송됨`);
-    } else {
-      console.log(`⚠️ 수신자가 오프라인입니다: ${targetUsername}`);
-      socket.emit('error', { message: '수신자가 오프라인입니다.' });
-    }
-  });
 });
 
 // API 라우트
