@@ -477,6 +477,21 @@ body {
     color: #667eea;
 }
 
+.btn-direct-message {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+    font-size: 0.9rem;
+}
+
+.btn-direct-message:hover {
+    transform: scale(1.05);
+}
+
 /* 토스트 알림 */
 .toast {
     position: fixed;

@@ -46,6 +46,12 @@ const joinRoomBtn = document.getElementById('joinRoomBtn');
 const closeCreateModalBtn = document.getElementById('closeCreateModalBtn');
 const closeJoinModalBtn = document.getElementById('closeJoinModalBtn');
 
+// 1대1 메시지 관련 DOM 요소들
+const directMessagesBtn = document.getElementById('directMessagesBtn');
+const directMessagesModal = document.getElementById('directMessagesModal');
+const directMessagesList = document.getElementById('directMessagesList');
+const closeDirectMessagesModalBtn = document.getElementById('closeDirectMessagesModalBtn');
+
 // 초기화
 document.addEventListener('DOMContentLoaded', () => {
     initializeApp();
@@ -185,14 +191,24 @@ function setupEventListeners() {
     // 근처 사용자 버튼
     nearbyUsersBtn.addEventListener('click', showNearbyUsersModal);
     
+    // 1대1 메시지 버튼
+    directMessagesBtn.addEventListener('click', showDirectMessagesModal);
+    
     // 위치 새로고침
     refreshLocationBtn.addEventListener('click', refreshLocation);
     
     // 모달 닫기
     closeModalBtn.addEventListener('click', hideNearbyUsersModal);
+    closeDirectMessagesModalBtn.addEventListener('click', hideDirectMessagesModal);
     nearbyUsersModal.addEventListener('click', (e) => {
         if (e.target === nearbyUsersModal) {
             hideNearbyUsersModal();
+        }
+    });
+    
+    directMessagesModal.addEventListener('click', (e) => {
+        if (e.target === directMessagesModal) {
+            hideDirectMessagesModal();
         }
     });
     
@@ -318,13 +334,15 @@ function setupSocketListeners() {
 
     // 1대1 메시지 수신
     socket.on('newDirectMessage', (messageData) => {
-        // 1대1 메시지 모드가 아니거나 다른 사용자와의 1대1 메시지인 경우
-        if (!isInDirectMessage || directMessageTarget !== messageData.senderName) {
-            // 일반 채팅으로 표시
-            addMessage(messageData, false);
-        } else {
+        console.log('1대1 메시지 수신:', messageData);
+        
+        // 1대1 메시지 모드이고 현재 대상과의 대화인 경우
+        if (isInDirectMessage && directMessageTarget === messageData.senderName) {
             // 1대1 메시지로 표시
             addMessage(messageData, messageData.senderName === currentUser.username);
+        } else {
+            // 일반 채팅으로 표시
+            addMessage(messageData, false);
         }
     });
 }
@@ -634,9 +652,12 @@ function showNearbyUsersModal() {
             
             userItem.innerHTML = `
                 <div class="user-info-modal">
-                    <div class="user-name">${user.username}</div>
+                    <div class="user-name">${escapeHtml(user.username)}</div>
                     <div class="user-distance">${user.distance}m 거리</div>
                 </div>
+                <button class="btn-direct-message" onclick="startDirectMessage('${escapeHtml(user.username)}')">
+                    <i class="fas fa-comment"></i>
+                </button>
             `;
             
             nearbyUsersList.appendChild(userItem);
@@ -649,6 +670,59 @@ function showNearbyUsersModal() {
 // 근처 사용자 모달 숨기기
 function hideNearbyUsersModal() {
     nearbyUsersModal.classList.remove('active');
+}
+
+// 1대1 메시지 목록 표시
+function showDirectMessagesModal() {
+    // 메시지 히스토리에서 1대1 메시지 상대방 목록 추출
+    const directMessagePartners = new Set();
+    
+    messageHistory.forEach(msg => {
+        if (msg.senderName !== currentUser.username) {
+            directMessagePartners.add(msg.senderName);
+        }
+    });
+    
+    directMessagesList.innerHTML = '';
+    
+    if (directMessagePartners.size === 0) {
+        directMessagesList.innerHTML = '<p style="text-align: center; color: #666;">1대1 메시지 기록이 없습니다.</p>';
+    } else {
+        Array.from(directMessagePartners).forEach(partner => {
+            const partnerItem = document.createElement('div');
+            partnerItem.className = 'user-item';
+            
+            // 해당 상대방과의 최근 메시지 찾기
+            const recentMessages = messageHistory
+                .filter(msg => msg.senderName === partner || 
+                             (msg.senderName === currentUser.username && msg.targetUsername === partner))
+                .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            
+            const lastMessage = recentMessages[0];
+            const lastMessageText = lastMessage ? 
+                (lastMessage.message.length > 30 ? lastMessage.message.substring(0, 30) + '...' : lastMessage.message) : 
+                '메시지 없음';
+            
+            partnerItem.innerHTML = `
+                <div class="user-info-modal">
+                    <div class="user-name">${escapeHtml(partner)}</div>
+                    <div class="user-distance">${lastMessageText}</div>
+                </div>
+                <button class="btn-direct-message" onclick="startDirectMessage('${escapeHtml(partner)}')">
+                    <i class="fas fa-comment"></i>
+                </button>
+            `;
+            
+            directMessagesList.appendChild(partnerItem);
+        });
+    }
+    
+    directMessagesModal.classList.add('active');
+}
+
+// 1대1 메시지 모달 숨기기
+function hideDirectMessagesModal() {
+    directMessagesModal.classList.remove('active');
 }
 
 // 화면 전환
@@ -828,6 +902,10 @@ function startDirectMessage(targetUsername) {
         showToast('자신에게는 메시지를 보낼 수 없습니다.', 'error');
         return;
     }
+    
+    // 모달들 닫기
+    hideNearbyUsersModal();
+    hideDirectMessagesModal();
     
     isInDirectMessage = true;
     directMessageTarget = targetUsername;
