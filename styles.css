@@ -577,6 +577,88 @@ body {
     background: #a8a8a8;
 }
 
+/* 프라이빗 방 스타일 */
+.private-room-info {
+    text-align: center;
+    padding: 20px 0;
+}
+
+.room-code-display {
+    margin-bottom: 30px;
+}
+
+.room-code-display h4 {
+    color: #333;
+    margin-bottom: 15px;
+    font-size: 1.1rem;
+}
+
+.code-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+    margin-bottom: 15px;
+}
+
+.room-code {
+    font-size: 2rem;
+    font-weight: bold;
+    color: #667eea;
+    background: #f8f9ff;
+    padding: 15px 25px;
+    border-radius: 10px;
+    border: 2px solid #e0e7ff;
+    letter-spacing: 3px;
+    font-family: 'Courier New', monospace;
+    min-width: 200px;
+    text-align: center;
+}
+
+.code-description {
+    color: #666;
+    font-size: 0.9rem;
+    line-height: 1.4;
+}
+
+.room-actions {
+    margin-top: 20px;
+}
+
+.join-room-form {
+    padding: 20px 0;
+}
+
+.join-room-form .input-group {
+    margin-bottom: 25px;
+}
+
+.join-room-form input {
+    text-align: center;
+    font-size: 1.2rem;
+    font-family: 'Courier New', monospace;
+    letter-spacing: 2px;
+    font-weight: bold;
+}
+
+/* 프라이빗 방 헤더 표시 */
+.private-room-indicator {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 8px 15px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: 10px;
+}
+
+.private-room-indicator i {
+    font-size: 0.7rem;
+}
+
 /* 애니메이션 */
 @keyframes fadeIn {
     from {

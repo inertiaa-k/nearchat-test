@@ -15,6 +15,10 @@ const io = socketIo(server, {
   }
 });
 
+// 프라이빗 방 관련 변수
+const privateRooms = new Map(); // roomCode -> { users: Set, messages: Array }
+const userRooms = new Map(); // socketId -> roomCode
+
 // 미들웨어 설정
 app.use(cors());
 app.use(express.json());
@@ -356,9 +360,114 @@ io.on('connection', (socket) => {
         });
       });
 
+      // 프라이빗 방에서 사용자 제거
+      const userRoomCode = userRooms.get(socket.id);
+      if (userRoomCode) {
+        leavePrivateRoom(socket.id, userRoomCode);
+      }
+
       connectedUsers.delete(socket.id);
+      userRooms.delete(socket.id);
       console.log(`${user.username}님이 연결을 해제했습니다.`);
     }
+  });
+
+  // 프라이빗 방 참가
+  socket.on('joinPrivateRoom', (data) => {
+    const { roomCode, username, latitude, longitude } = data;
+    const user = connectedUsers.get(socket.id);
+    
+    if (!user) {
+      socket.emit('privateRoomError', { message: '사용자 정보를 찾을 수 없습니다.' });
+      return;
+    }
+
+    console.log(`🔐 프라이빗 방 참가 요청: ${username} -> ${roomCode}`);
+
+    // 방이 존재하지 않으면 생성
+    if (!privateRooms.has(roomCode)) {
+      privateRooms.set(roomCode, {
+        users: new Set(),
+        messages: []
+      });
+      console.log(`🏠 새로운 프라이빗 방 생성: ${roomCode}`);
+    }
+
+    const room = privateRooms.get(roomCode);
+    
+    // 사용자를 방에 추가
+    room.users.add(socket.id);
+    userRooms.set(socket.id, roomCode);
+    
+    // 소켓을 방에 조인
+    socket.join(roomCode);
+    
+    // 방의 다른 사용자들에게 새 사용자 참가 알림
+    socket.to(roomCode).emit('userJoinedPrivateRoom', {
+      socketId: socket.id,
+      username: user.username,
+      roomCode: roomCode
+    });
+
+    // 사용자에게 방 참가 성공 알림
+    socket.emit('privateRoomJoined', {
+      roomCode: roomCode,
+      users: Array.from(room.users).map(socketId => {
+        const roomUser = connectedUsers.get(socketId);
+        return roomUser ? { socketId, username: roomUser.username } : null;
+      }).filter(Boolean)
+    });
+
+    console.log(`✅ ${username}님이 프라이빗 방 ${roomCode}에 참가했습니다.`);
+  });
+
+  // 프라이빗 방 메시지 전송
+  socket.on('sendPrivateMessage', (data) => {
+    const { message, roomCode } = data;
+    const user = connectedUsers.get(socket.id);
+    
+    if (!user) {
+      socket.emit('privateRoomError', { message: '사용자 정보를 찾을 수 없습니다.' });
+      return;
+    }
+
+    const userRoomCode = userRooms.get(socket.id);
+    if (userRoomCode !== roomCode) {
+      socket.emit('privateRoomError', { message: '해당 방에 참가하지 않았습니다.' });
+      return;
+    }
+
+    console.log(`💬 프라이빗 메시지: ${user.username} -> ${roomCode}`);
+    console.log(`📝 내용: ${message}`);
+
+    const messageData = {
+      senderId: socket.id,
+      senderName: user.username,
+      message,
+      roomCode,
+      timestamp: new Date().toISOString()
+    };
+
+    // 방의 모든 사용자에게 메시지 전송
+    io.to(roomCode).emit('newPrivateMessage', messageData);
+
+    // 방의 메시지 히스토리에 저장
+    const room = privateRooms.get(roomCode);
+    if (room) {
+      room.messages.push(messageData);
+      // 최근 100개 메시지만 유지
+      if (room.messages.length > 100) {
+        room.messages = room.messages.slice(-100);
+      }
+    }
+
+    console.log(`✅ 프라이빗 메시지 전송 완료`);
+  });
+
+  // 프라이빗 방 나가기
+  socket.on('leavePrivateRoom', (data) => {
+    const { roomCode } = data;
+    leavePrivateRoom(socket.id, roomCode);
   });
 });
 
@@ -398,6 +507,47 @@ app.get('/api/messages', (req, res) => {
   } else {
     res.status(400).json({ error: '위도와 경도가 필요합니다.' });
   }
+});
+
+// 프라이빗 방 관련 헬퍼 함수들
+function leavePrivateRoom(socketId, roomCode) {
+  const user = connectedUsers.get(socketId);
+  if (!user) return;
+
+  const room = privateRooms.get(roomCode);
+  if (!room) return;
+
+  // 사용자를 방에서 제거
+  room.users.delete(socketId);
+  userRooms.delete(socketId);
+
+  // 소켓을 방에서 나가기
+  io.sockets.sockets.get(socketId)?.leave(roomCode);
+
+  // 방의 다른 사용자들에게 사용자 퇴장 알림
+  io.to(roomCode).emit('userLeftPrivateRoom', {
+    socketId: socketId,
+    username: user.username,
+    roomCode: roomCode
+  });
+
+  // 방이 비어있으면 방 삭제
+  if (room.users.size === 0) {
+    privateRooms.delete(roomCode);
+    console.log(`🏠 프라이빗 방 ${roomCode}가 삭제되었습니다. (마지막 사용자 퇴장)`);
+  }
+
+  console.log(`${user.username}님이 프라이빗 방 ${roomCode}에서 나갔습니다.`);
+}
+
+// 프라이빗 방 정보 조회 API
+app.get('/api/private-rooms', (req, res) => {
+  const rooms = Array.from(privateRooms.entries()).map(([roomCode, room]) => ({
+    roomCode,
+    userCount: room.users.size,
+    messageCount: room.messages.length
+  }));
+  res.json(rooms);
 });
 
 const PORT = process.env.PORT || 3000;
