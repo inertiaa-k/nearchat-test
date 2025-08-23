@@ -187,6 +187,31 @@ function setupSocketListeners() {
     socket.on('messageSent', (messageData) => {
         addMessage(messageData, true);
     });
+
+    // 최근 메시지 히스토리 수신
+    socket.on('recentMessages', (messages) => {
+        console.log('최근 메시지 히스토리 수신:', messages.length + '개');
+        
+        // 기존 메시지 컨테이너 초기화
+        messagesContainer.innerHTML = '';
+        
+        if (messages.length === 0) {
+            // 메시지가 없으면 환영 메시지 표시
+            messagesContainer.innerHTML = `
+                <div class="welcome-message">
+                    <i class="fas fa-hand-wave"></i>
+                    <h3>환영합니다!</h3>
+                    <p>근처 500m 내의 사람들과 대화를 시작하세요.</p>
+                    <p>메시지를 입력하고 Enter를 누르거나 전송 버튼을 클릭하세요.</p>
+                </div>
+            `;
+        } else {
+            // 최근 메시지들을 시간순으로 표시
+            messages.forEach(messageData => {
+                addMessage(messageData, messageData.senderName === currentUser.username);
+            });
+        }
+    });
     
     // 사용자 위치 업데이트
     socket.on('userLocationUpdated', (user) => {
