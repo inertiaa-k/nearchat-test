@@ -9,6 +9,9 @@ let nearbyUsers = [];
 let locationWatchId = null;
 let currentRoomCode = null;
 let isInPrivateRoom = false;
+let messageHistory = []; // 메시지 히스토리 저장
+let isInDirectMessage = false; // 1대1 메시지 모드
+let directMessageTarget = null; // 1대1 메시지 대상
 
 // DOM 요소들
 const loginScreen = document.getElementById('loginScreen');
@@ -59,6 +62,24 @@ function saveLoginState(username, latitude, longitude) {
         timestamp: new Date().getTime()
     };
     localStorage.setItem('gpsChatLogin', JSON.stringify(loginData));
+}
+
+// 메시지 히스토리 저장
+function saveMessageHistory(messages) {
+    localStorage.setItem('gpsChatMessages', JSON.stringify(messages));
+}
+
+// 메시지 히스토리 복원
+function loadMessageHistory() {
+    const savedMessages = localStorage.getItem('gpsChatMessages');
+    if (savedMessages) {
+        try {
+            return JSON.parse(savedMessages);
+        } catch (error) {
+            localStorage.removeItem('gpsChatMessages');
+        }
+    }
+    return [];
 }
 
 function loadLoginState() {
@@ -117,6 +138,9 @@ function initializeApp() {
             longitude: savedLogin.longitude
         });
         
+        // 메시지 히스토리 복원
+        restoreMessageHistory();
+        
         showToast('자동 로그인되었습니다.', 'success');
     }
     
@@ -136,7 +160,10 @@ function setupEventListeners() {
     
     // 뒤로가기 버튼
     backBtn.addEventListener('click', () => {
-        if (isInPrivateRoom) {
+        if (isInDirectMessage) {
+            // 1대1 메시지에서 나가기
+            endDirectMessage();
+        } else if (isInPrivateRoom) {
             // 프라이빗 방에서 나가기
             leavePrivateRoom();
         } else {
@@ -287,6 +314,18 @@ function setupSocketListeners() {
 
     socket.on('privateRoomError', (error) => {
         showToast(error.message, 'error');
+    });
+
+    // 1대1 메시지 수신
+    socket.on('newDirectMessage', (messageData) => {
+        // 1대1 메시지 모드가 아니거나 다른 사용자와의 1대1 메시지인 경우
+        if (!isInDirectMessage || directMessageTarget !== messageData.senderName) {
+            // 일반 채팅으로 표시
+            addMessage(messageData, false);
+        } else {
+            // 1대1 메시지로 표시
+            addMessage(messageData, messageData.senderName === currentUser.username);
+        }
     });
 }
 
@@ -458,7 +497,13 @@ function sendMessage() {
         return;
     }
     
-    if (isInPrivateRoom && currentRoomCode) {
+    if (isInDirectMessage && directMessageTarget) {
+        // 1대1 메시지 전송 (실제로는 일반 채팅으로 전송하되, 특정 사용자에게만 표시)
+        socket.emit('sendDirectMessage', { 
+            message: escapeHtml(message), 
+            targetUsername: directMessageTarget 
+        });
+    } else if (isInPrivateRoom && currentRoomCode) {
         // 프라이빗 방 메시지 전송
         socket.emit('sendPrivateMessage', { 
             message: escapeHtml(message), 
@@ -500,6 +545,22 @@ function addMessage(messageData, isSent) {
         return;
     }
     
+    // 메시지 히스토리에 저장
+    const messageToSave = {
+        ...messageData,
+        isSent: isSent,
+        timestamp: messageData.timestamp || new Date().toISOString()
+    };
+    messageHistory.push(messageToSave);
+    
+    // 최근 100개 메시지만 유지
+    if (messageHistory.length > 100) {
+        messageHistory = messageHistory.slice(-100);
+    }
+    
+    // 로컬 스토리지에 저장
+    saveMessageHistory(messageHistory);
+    
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${isSent ? 'sent' : 'received'}`;
     
@@ -508,6 +569,12 @@ function addMessage(messageData, isSent) {
         const senderNameTop = document.createElement('div');
         senderNameTop.className = 'sender-name-top';
         senderNameTop.textContent = escapeHtml(messageData.senderName);
+        // 1대1 메시지가 아닐 때만 클릭 가능
+        if (!isInDirectMessage) {
+            senderNameTop.style.cursor = 'pointer';
+            senderNameTop.title = '클릭하여 1대1 메시지 시작';
+            senderNameTop.addEventListener('click', () => startDirectMessage(messageData.senderName));
+        }
         messageDiv.appendChild(senderNameTop);
     }
     
@@ -755,6 +822,83 @@ function updatePrivateRoomStatus() {
     }
 }
 
+// 1대1 메시지 시작
+function startDirectMessage(targetUsername) {
+    if (targetUsername === currentUser.username) {
+        showToast('자신에게는 메시지를 보낼 수 없습니다.', 'error');
+        return;
+    }
+    
+    isInDirectMessage = true;
+    directMessageTarget = targetUsername;
+    
+    // 1대1 메시지 화면으로 변경
+    messagesContainer.innerHTML = `
+        <div class="welcome-message">
+            <i class="fas fa-user"></i>
+            <h3>1대1 메시지</h3>
+            <p><strong>${escapeHtml(targetUsername)}</strong>님과의 1대1 대화</p>
+            <p>메시지를 입력하고 Enter를 누르거나 전송 버튼을 클릭하세요.</p>
+        </div>
+    `;
+    
+    // 헤더에 1대1 메시지 표시
+    updateDirectMessageStatus();
+    
+    showToast(`${targetUsername}님과 1대1 메시지를 시작합니다.`, 'info');
+}
+
+// 1대1 메시지 종료
+function endDirectMessage() {
+    isInDirectMessage = false;
+    directMessageTarget = null;
+    
+    // 일반 채팅 화면으로 복원
+    messagesContainer.innerHTML = `
+        <div class="welcome-message">
+            <i class="fas fa-hand-wave"></i>
+            <h3>환영합니다!</h3>
+            <p>근처 500m 내의 사람들과 대화를 시작하세요.</p>
+            <p>메시지를 입력하고 Enter를 누르거나 전송 버튼을 클릭하세요.</p>
+        </div>
+    `;
+    
+    // 저장된 메시지 히스토리 복원
+    restoreMessageHistory();
+    
+    updateDirectMessageStatus();
+    showToast('일반 채팅으로 돌아왔습니다.', 'info');
+}
+
+// 1대1 메시지 상태 업데이트
+function updateDirectMessageStatus() {
+    const existingIndicator = document.querySelector('.direct-message-indicator');
+    if (existingIndicator) {
+        existingIndicator.remove();
+    }
+    
+    if (isInDirectMessage && directMessageTarget) {
+        const indicator = document.createElement('div');
+        indicator.className = 'direct-message-indicator';
+        indicator.innerHTML = `
+            <i class="fas fa-user"></i>
+            <span>1대1: ${escapeHtml(directMessageTarget)}</span>
+        `;
+        document.querySelector('.user-info').appendChild(indicator);
+    }
+}
+
+// 메시지 히스토리 복원
+function restoreMessageHistory() {
+    const savedHistory = loadMessageHistory();
+    if (savedHistory.length > 0) {
+        messagesContainer.innerHTML = '';
+        savedHistory.forEach(msg => {
+            addMessage(msg, msg.isSent);
+        });
+    }
+}
+
 // 일반 채팅방으로 돌아가기
 function leavePrivateRoom() {
     if (isInPrivateRoom) {
@@ -772,6 +916,9 @@ function leavePrivateRoom() {
                 <p>메시지를 입력하고 Enter를 누르거나 전송 버튼을 클릭하세요.</p>
             </div>
         `;
+        
+        // 저장된 메시지 히스토리 복원
+        restoreMessageHistory();
         
         showToast('일반 채팅방으로 돌아왔습니다.', 'info');
     }

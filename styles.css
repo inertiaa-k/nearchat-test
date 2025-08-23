@@ -668,6 +668,24 @@ body {
     font-size: 0.7rem;
 }
 
+/* 1대1 메시지 헤더 표시 */
+.direct-message-indicator {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    color: white;
+    padding: 8px 15px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: 10px;
+}
+
+.direct-message-indicator i {
+    font-size: 0.7rem;
+}
+
 /* 애니메이션 */
 @keyframes fadeIn {
     from {
