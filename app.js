@@ -50,6 +50,42 @@ document.addEventListener('DOMContentLoaded', () => {
     getCurrentLocation();
 });
 
+// 로그인 상태 저장/복원 함수들
+function saveLoginState(username, latitude, longitude) {
+    const loginData = {
+        username: username,
+        latitude: latitude,
+        longitude: longitude,
+        timestamp: new Date().getTime()
+    };
+    localStorage.setItem('gpsChatLogin', JSON.stringify(loginData));
+}
+
+function loadLoginState() {
+    const savedData = localStorage.getItem('gpsChatLogin');
+    if (savedData) {
+        try {
+            const loginData = JSON.parse(savedData);
+            const now = new Date().getTime();
+            const ONE_DAY = 24 * 60 * 60 * 1000; // 24시간
+            
+            // 24시간 이내의 로그인 데이터만 유효
+            if (now - loginData.timestamp < ONE_DAY) {
+                return loginData;
+            } else {
+                localStorage.removeItem('gpsChatLogin');
+            }
+        } catch (error) {
+            localStorage.removeItem('gpsChatLogin');
+        }
+    }
+    return null;
+}
+
+function clearLoginState() {
+    localStorage.removeItem('gpsChatLogin');
+}
+
 // 앱 초기화
 function initializeApp() {
     // Socket.IO 연결
@@ -57,6 +93,32 @@ function initializeApp() {
     
     // Socket 이벤트 리스너 설정
     setupSocketListeners();
+    
+    // 저장된 로그인 상태 확인
+    const savedLogin = loadLoginState();
+    if (savedLogin) {
+        // 자동 로그인
+        currentUser.username = savedLogin.username;
+        currentUser.latitude = savedLogin.latitude;
+        currentUser.longitude = savedLogin.longitude;
+        
+        // UI 업데이트
+        usernameInput.value = savedLogin.username;
+        currentUsername.textContent = savedLogin.username;
+        updateLocationText(savedLogin.latitude, savedLogin.longitude);
+        
+        // 채팅 화면으로 이동
+        showScreen(chatScreen);
+        
+        // 서버에 사용자 등록
+        socket.emit('register', {
+            username: savedLogin.username,
+            latitude: savedLogin.latitude,
+            longitude: savedLogin.longitude
+        });
+        
+        showToast('자동 로그인되었습니다.', 'success');
+    }
     
     // 사용자 이름 입력 필드 이벤트
     usernameInput.addEventListener('input', validateForm);
@@ -78,9 +140,9 @@ function setupEventListeners() {
             // 프라이빗 방에서 나가기
             leavePrivateRoom();
         } else {
-            // 로그인 화면으로 돌아가기
+            // 로그인 화면으로 돌아가기 (로그인 상태는 유지)
             showScreen(loginScreen);
-            disconnectFromChat();
+            // 로그인 상태는 유지하므로 disconnectFromChat() 호출하지 않음
         }
     });
     
@@ -338,6 +400,9 @@ function startChat() {
     
     currentUser.username = username;
     
+    // 로그인 상태 저장
+    saveLoginState(username, currentUser.latitude, currentUser.longitude);
+    
     // 서버에 사용자 등록
     socket.emit('register', {
         username: currentUser.username,
@@ -361,6 +426,9 @@ function disconnectFromChat() {
         navigator.geolocation.clearWatch(locationWatchId);
         locationWatchId = null;
     }
+    
+    // 로그인 상태 삭제
+    clearLoginState();
     
     // 입력 필드 초기화
     usernameInput.value = '';
@@ -435,6 +503,14 @@ function addMessage(messageData, isSent) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${isSent ? 'sent' : 'received'}`;
     
+    // 발신자 이름을 메시지 위에 표시 (받은 메시지만)
+    if (!isSent) {
+        const senderNameTop = document.createElement('div');
+        senderNameTop.className = 'sender-name-top';
+        senderNameTop.textContent = escapeHtml(messageData.senderName);
+        messageDiv.appendChild(senderNameTop);
+    }
+    
     const messageContent = document.createElement('div');
     messageContent.className = 'message-content';
     messageContent.textContent = escapeHtml(messageData.message);
@@ -442,15 +518,10 @@ function addMessage(messageData, isSent) {
     const messageInfo = document.createElement('div');
     messageInfo.className = 'message-info';
     
-    const senderName = document.createElement('span');
-    senderName.className = 'sender-name';
-    senderName.textContent = escapeHtml(messageData.senderName);
-    
     const timestamp = document.createElement('span');
     timestamp.className = 'timestamp';
     timestamp.textContent = formatTime(messageData.timestamp);
     
-    messageInfo.appendChild(senderName);
     messageInfo.appendChild(timestamp);
     
     messageDiv.appendChild(messageContent);
@@ -553,10 +624,19 @@ function showToast(message, type = 'info') {
     }, 3000);
 }
 
-// 페이지 언로드 시 정리
+// 페이지 언로드 시 정리 (탭 닫을 때만 로그인 상태 삭제)
 window.addEventListener('beforeunload', () => {
     if (locationWatchId) {
         navigator.geolocation.clearWatch(locationWatchId);
+    }
+    
+    // 탭을 닫을 때만 로그인 상태 삭제
+    // 페이지 새로고침이나 뒤로가기 시에는 유지
+    if (performance.navigation.type === 1) { // 새로고침
+        // 로그인 상태 유지
+    } else {
+        // 탭 닫기 시 로그인 상태 삭제
+        clearLoginState();
     }
 });
 
