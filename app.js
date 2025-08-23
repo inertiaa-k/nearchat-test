@@ -383,37 +383,68 @@ function disconnectFromChat() {
 // 메시지 전송
 function sendMessage() {
     const message = messageInput.value.trim();
-    if (!message) return;
+    
+    // 입력값 검증
+    if (!validateInput(message)) {
+        showToast('유효하지 않은 메시지입니다.', 'error');
+        return;
+    }
     
     if (isInPrivateRoom && currentRoomCode) {
         // 프라이빗 방 메시지 전송
         socket.emit('sendPrivateMessage', { 
-            message, 
+            message: escapeHtml(message), 
             roomCode: currentRoomCode 
         });
     } else {
         // 일반 채팅 메시지 전송
-        socket.emit('sendMessage', { message });
+        socket.emit('sendMessage', { message: escapeHtml(message) });
     }
     
     messageInput.value = '';
 }
 
+// HTML 이스케이프 함수
+function escapeHtml(text) {
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, function(m) { return map[m]; });
+}
+
+// 입력값 검증 함수
+function validateInput(input, maxLength = 500) {
+    if (typeof input !== 'string') return false;
+    if (input.length > maxLength) return false;
+    if (input.trim().length === 0) return false;
+    return true;
+}
+
 // 메시지 추가
 function addMessage(messageData, isSent) {
+    // 입력값 검증
+    if (!validateInput(messageData.message) || !validateInput(messageData.senderName, 20)) {
+        console.error('유효하지 않은 메시지 데이터:', messageData);
+        return;
+    }
+    
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${isSent ? 'sent' : 'received'}`;
     
     const messageContent = document.createElement('div');
     messageContent.className = 'message-content';
-    messageContent.textContent = messageData.message;
+    messageContent.textContent = escapeHtml(messageData.message);
     
     const messageInfo = document.createElement('div');
     messageInfo.className = 'message-info';
     
     const senderName = document.createElement('span');
     senderName.className = 'sender-name';
-    senderName.textContent = messageData.senderName;
+    senderName.textContent = escapeHtml(messageData.senderName);
     
     const timestamp = document.createElement('span');
     timestamp.className = 'timestamp';

@@ -16,8 +16,60 @@ const io = socketIo(server, {
 });
 
 // 프라이빗 방 관련 변수
-const privateRooms = new Map(); // roomCode -> { users: Set, messages: Array }
+const privateRooms = new Map(); // roomCode -> { users: Set, messages: Array, createdAt: Date }
 const userRooms = new Map(); // socketId -> roomCode
+
+// Rate Limiting 관련 변수
+const messageLimits = new Map(); // socketId -> { count: number, lastReset: Date }
+const MAX_MESSAGES_PER_MINUTE = 30;
+const MAX_USERNAME_LENGTH = 20;
+const MAX_MESSAGE_LENGTH = 500;
+
+// 입력값 검증 함수
+function validateInput(input, maxLength = MAX_MESSAGE_LENGTH) {
+  if (typeof input !== 'string') return false;
+  if (input.length > maxLength) return false;
+  if (input.trim().length === 0) return false;
+  // XSS 방지를 위한 기본 검증
+  if (/<script|javascript:|on\w+=/i.test(input)) return false;
+  return true;
+}
+
+// HTML 이스케이프 함수
+function escapeHtml(text) {
+  const map = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  };
+  return text.replace(/[&<>"']/g, function(m) { return map[m]; });
+}
+
+// Rate Limiting 검사
+function checkRateLimit(socketId) {
+  const now = new Date();
+  const userLimit = messageLimits.get(socketId);
+  
+  if (!userLimit) {
+    messageLimits.set(socketId, { count: 1, lastReset: now });
+    return true;
+  }
+  
+  // 1분이 지나면 리셋
+  if (now - userLimit.lastReset > 60000) {
+    messageLimits.set(socketId, { count: 1, lastReset: now });
+    return true;
+  }
+  
+  if (userLimit.count >= MAX_MESSAGES_PER_MINUTE) {
+    return false;
+  }
+  
+  userLimit.count++;
+  return true;
+}
 
 // 미들웨어 설정
 app.use(cors());
@@ -187,7 +239,26 @@ io.on('connection', (socket) => {
   socket.on('register', (data) => {
     const { username, latitude, longitude } = data;
     
-    console.log(`\n🚀 새 사용자 등록: ${username}`);
+    // 입력값 검증
+    if (!validateInput(username, MAX_USERNAME_LENGTH)) {
+      socket.emit('error', { message: '유효하지 않은 사용자명입니다.' });
+      return;
+    }
+    
+    if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+      socket.emit('error', { message: '유효하지 않은 위치 정보입니다.' });
+      return;
+    }
+    
+    if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+      socket.emit('error', { message: '위치 정보가 범위를 벗어났습니다.' });
+      return;
+    }
+    
+    // 사용자명 이스케이프
+    const sanitizedUsername = escapeHtml(username.trim());
+    
+    console.log(`\n🚀 새 사용자 등록: ${sanitizedUsername}`);
     console.log(`📍 위치: ${latitude}, ${longitude}`);
     console.log(`🆔 Socket ID: ${socket.id}`);
     
@@ -294,6 +365,18 @@ io.on('connection', (socket) => {
     const { message } = data;
     const user = connectedUsers.get(socket.id);
     
+    // Rate Limiting 검사
+    if (!checkRateLimit(socket.id)) {
+      socket.emit('error', { message: '메시지 전송 속도가 너무 빠릅니다. 잠시 후 다시 시도해주세요.' });
+      return;
+    }
+    
+    // 입력값 검증
+    if (!validateInput(message)) {
+      socket.emit('error', { message: '유효하지 않은 메시지입니다.' });
+      return;
+    }
+    
     if (user && user.latitude && user.longitude) {
       console.log(`\n💬 메시지 전송: ${user.username}`);
       console.log(`📝 내용: ${message}`);
@@ -382,13 +465,32 @@ io.on('connection', (socket) => {
       return;
     }
 
+    // 입력값 검증
+    if (!validateInput(roomCode, 6) || roomCode.length !== 6) {
+      socket.emit('privateRoomError', { message: '유효하지 않은 방 코드입니다.' });
+      return;
+    }
+
+    // 방 코드 형식 검증 (영문 대문자 + 숫자만)
+    if (!/^[A-Z0-9]{6}$/.test(roomCode)) {
+      socket.emit('privateRoomError', { message: '방 코드는 6자리 영문 대문자와 숫자만 가능합니다.' });
+      return;
+    }
+
+    // 이미 다른 프라이빗 방에 있는지 확인
+    if (userRooms.has(socket.id)) {
+      socket.emit('privateRoomError', { message: '이미 다른 프라이빗 방에 참가 중입니다.' });
+      return;
+    }
+
     console.log(`🔐 프라이빗 방 참가 요청: ${username} -> ${roomCode}`);
 
     // 방이 존재하지 않으면 생성
     if (!privateRooms.has(roomCode)) {
       privateRooms.set(roomCode, {
         users: new Set(),
-        messages: []
+        messages: [],
+        createdAt: new Date()
       });
       console.log(`🏠 새로운 프라이빗 방 생성: ${roomCode}`);
     }
@@ -431,9 +533,32 @@ io.on('connection', (socket) => {
       return;
     }
 
+    // Rate Limiting 검사
+    if (!checkRateLimit(socket.id)) {
+      socket.emit('privateRoomError', { message: '메시지 전송 속도가 너무 빠릅니다.' });
+      return;
+    }
+
+    // 입력값 검증
+    if (!validateInput(message)) {
+      socket.emit('privateRoomError', { message: '유효하지 않은 메시지입니다.' });
+      return;
+    }
+
+    if (!validateInput(roomCode, 6) || roomCode.length !== 6) {
+      socket.emit('privateRoomError', { message: '유효하지 않은 방 코드입니다.' });
+      return;
+    }
+
     const userRoomCode = userRooms.get(socket.id);
     if (userRoomCode !== roomCode) {
       socket.emit('privateRoomError', { message: '해당 방에 참가하지 않았습니다.' });
+      return;
+    }
+
+    // 방이 존재하는지 확인
+    if (!privateRooms.has(roomCode)) {
+      socket.emit('privateRoomError', { message: '존재하지 않는 방입니다.' });
       return;
     }
 
@@ -549,6 +674,37 @@ app.get('/api/private-rooms', (req, res) => {
   }));
   res.json(rooms);
 });
+
+// 자동 정리 함수들
+function cleanupOldRooms() {
+  const now = new Date();
+  const ONE_HOUR = 60 * 60 * 1000; // 1시간
+  
+  for (const [roomCode, room] of privateRooms.entries()) {
+    // 1시간 이상 비어있는 방 삭제
+    if (room.users.size === 0 && (now - room.createdAt) > ONE_HOUR) {
+      privateRooms.delete(roomCode);
+      console.log(`🧹 오래된 빈 방 삭제: ${roomCode}`);
+    }
+  }
+}
+
+function cleanupOldLimits() {
+  const now = new Date();
+  const ONE_HOUR = 60 * 60 * 1000; // 1시간
+  
+  for (const [socketId, limit] of messageLimits.entries()) {
+    if ((now - limit.lastReset) > ONE_HOUR) {
+      messageLimits.delete(socketId);
+    }
+  }
+}
+
+// 10분마다 정리 작업 실행
+setInterval(() => {
+  cleanupOldRooms();
+  cleanupOldLimits();
+}, 10 * 60 * 1000);
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
