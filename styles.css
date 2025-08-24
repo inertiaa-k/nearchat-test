@@ -873,3 +873,76 @@ body {
     background: #5a6268;
     transform: translateY(-1px);
 }
+
+/* 프라이빗 방 초대 모달 */
+.invite-content {
+    text-align: center;
+    padding: 20px 0;
+}
+
+.invite-info {
+    margin-bottom: 25px;
+}
+
+.invite-info i {
+    font-size: 3rem;
+    color: #667eea;
+    margin-bottom: 15px;
+}
+
+.invite-info h4 {
+    color: #333;
+    margin-bottom: 10px;
+    font-size: 1.3rem;
+}
+
+.invite-info p {
+    color: #666;
+    line-height: 1.5;
+}
+
+.invite-actions {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+}
+
+.invite-actions button {
+    flex: 1;
+    max-width: 150px;
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: all 0.3s ease;
+}
+
+/* 사용자 목록에서 클릭 가능한 사용자 이름 */
+.user-item {
+    cursor: pointer;
+    transition: all 0.3s ease;
+    padding: 10px 15px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.user-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.user-item .user-name {
+    font-weight: 600;
+    color: #667eea;
+}
+
+.user-item .user-distance {
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.7);
+}

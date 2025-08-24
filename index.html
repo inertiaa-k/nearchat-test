@@ -230,6 +230,68 @@
             </div>
         </div>
 
+        <!-- 프라이빗 방 초대 모달 -->
+        <div id="privateRoomInviteModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>프라이빗 방 초대</h3>
+                    <button id="closeInviteModalBtn" class="btn-icon">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="invite-content">
+                        <div class="invite-info">
+                            <i class="fas fa-user-friends"></i>
+                            <h4 id="inviteTargetUsername">사용자</h4>
+                            <p>이 사용자를 프라이빗 방에 초대하시겠습니까?</p>
+                        </div>
+                        <div class="invite-actions">
+                            <button id="sendInviteBtn" class="btn-primary">
+                                <i class="fas fa-paper-plane"></i>
+                                초대 보내기
+                            </button>
+                            <button id="cancelInviteBtn" class="btn-secondary">
+                                <i class="fas fa-times"></i>
+                                취소
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 프라이빗 방 초대 수락/거절 모달 -->
+        <div id="privateRoomInviteResponseModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>프라이빗 방 초대</h3>
+                    <button id="closeInviteResponseModalBtn" class="btn-icon">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="invite-content">
+                        <div class="invite-info">
+                            <i class="fas fa-envelope-open"></i>
+                            <h4 id="inviterUsername">사용자</h4>
+                            <p id="inviteMessage">님이 프라이빗 방에 초대했습니다.</p>
+                        </div>
+                        <div class="invite-actions">
+                            <button id="acceptInviteBtn" class="btn-primary">
+                                <i class="fas fa-check"></i>
+                                수락
+                            </button>
+                            <button id="rejectInviteBtn" class="btn-secondary">
+                                <i class="fas fa-times"></i>
+                                거절
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- 알림 토스트 -->
         <div id="toast" class="toast"></div>
     </div>

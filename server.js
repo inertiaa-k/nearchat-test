@@ -687,6 +687,76 @@ io.on('connection', (socket) => {
     console.log(`✅ 프라이빗 메시지 전송 완료`);
   });
 
+  // 프라이빗 방 초대
+  socket.on('inviteToPrivateRoom', (data) => {
+    const { roomCode, targetUsername } = data;
+    const user = connectedUsers.get(socket.id);
+    
+    if (!user) {
+      socket.emit('privateRoomError', { message: '사용자 정보를 찾을 수 없습니다.' });
+      return;
+    }
+
+    // 방이 존재하는지 확인
+    const room = privateRooms.get(roomCode);
+    if (!room) {
+      socket.emit('privateRoomError', { message: '존재하지 않는 방입니다.' });
+      return;
+    }
+
+    // 초대자가 해당 방에 있는지 확인
+    if (!room.users.has(socket.id)) {
+      socket.emit('privateRoomError', { message: '해당 방에 참가하지 않았습니다.' });
+      return;
+    }
+
+    // 초대할 사용자 찾기
+    let targetSocketId = null;
+    for (const [socketId, connectedUser] of connectedUsers.entries()) {
+      if (connectedUser.username === targetUsername) {
+        targetSocketId = socketId;
+        break;
+      }
+    }
+
+    if (!targetSocketId) {
+      socket.emit('privateRoomError', { message: '초대할 사용자를 찾을 수 없습니다.' });
+      return;
+    }
+
+    // 초대 메시지 전송
+    io.sockets.sockets.get(targetSocketId)?.emit('privateRoomInvite', {
+      roomCode: roomCode,
+      inviterUsername: user.username,
+      inviterSocketId: socket.id
+    });
+
+    console.log(`📨 ${user.username}님이 ${targetUsername}님을 프라이빗 방 ${roomCode}에 초대했습니다.`);
+  });
+
+  // 프라이빗 방 초대 응답
+  socket.on('respondToPrivateRoomInvite', (data) => {
+    const { roomCode, inviterSocketId, accept } = data;
+    const user = connectedUsers.get(socket.id);
+    
+    if (!user) {
+      socket.emit('privateRoomError', { message: '사용자 정보를 찾을 수 없습니다.' });
+      return;
+    }
+
+    if (accept) {
+      // 초대 수락 - 방에 참가
+      socket.emit('joinPrivateRoom', { roomCode: roomCode });
+    } else {
+      // 초대 거절
+      io.sockets.sockets.get(inviterSocketId)?.emit('privateRoomInviteRejected', {
+        targetUsername: user.username
+      });
+    }
+
+    console.log(`${user.username}님이 프라이빗 방 초대를 ${accept ? '수락' : '거절'}했습니다.`);
+  });
+
   // 프라이빗 방 삭제 투표 시작
   socket.on('startRoomDeletionVote', (data) => {
     const { roomCode } = data;

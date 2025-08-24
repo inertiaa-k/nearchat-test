@@ -57,6 +57,21 @@ const agreeVoteBtn = document.getElementById('agreeVoteBtn');
 const disagreeVoteBtn = document.getElementById('disagreeVoteBtn');
 const closeVoteModalBtn = document.getElementById('closeVoteModalBtn');
 
+// 프라이빗 방 초대 관련 DOM 요소들
+const privateRoomInviteModal = document.getElementById('privateRoomInviteModal');
+const inviteTargetUsername = document.getElementById('inviteTargetUsername');
+const sendInviteBtn = document.getElementById('sendInviteBtn');
+const cancelInviteBtn = document.getElementById('cancelInviteBtn');
+const closeInviteModalBtn = document.getElementById('closeInviteModalBtn');
+
+// 프라이빗 방 초대 응답 관련 DOM 요소들
+const privateRoomInviteResponseModal = document.getElementById('privateRoomInviteResponseModal');
+const inviterUsername = document.getElementById('inviterUsername');
+const inviteMessage = document.getElementById('inviteMessage');
+const acceptInviteBtn = document.getElementById('acceptInviteBtn');
+const rejectInviteBtn = document.getElementById('rejectInviteBtn');
+const closeInviteResponseModalBtn = document.getElementById('closeInviteResponseModalBtn');
+
 
 
 // 초기화
@@ -177,6 +192,30 @@ function setupEventListeners() {
     roomDeletionVoteModal.addEventListener('click', (e) => {
         if (e.target === roomDeletionVoteModal) {
             hideRoomDeletionVoteModal();
+        }
+    });
+    
+    // 프라이빗 방 초대 관련 이벤트 리스너
+    sendInviteBtn.addEventListener('click', sendPrivateRoomInvite);
+    cancelInviteBtn.addEventListener('click', hidePrivateRoomInviteModal);
+    closeInviteModalBtn.addEventListener('click', hidePrivateRoomInviteModal);
+    
+    // 초대 모달 외부 클릭 시 닫기
+    privateRoomInviteModal.addEventListener('click', (e) => {
+        if (e.target === privateRoomInviteModal) {
+            hidePrivateRoomInviteModal();
+        }
+    });
+    
+    // 프라이빗 방 초대 응답 관련 이벤트 리스너
+    acceptInviteBtn.addEventListener('click', () => respondToPrivateRoomInvite(true));
+    rejectInviteBtn.addEventListener('click', () => respondToPrivateRoomInvite(false));
+    closeInviteResponseModalBtn.addEventListener('click', hidePrivateRoomInviteResponseModal);
+    
+    // 초대 응답 모달 외부 클릭 시 닫기
+    privateRoomInviteResponseModal.addEventListener('click', (e) => {
+        if (e.target === privateRoomInviteResponseModal) {
+            hidePrivateRoomInviteResponseModal();
         }
     });
 }
@@ -310,8 +349,23 @@ function setupSocketListeners() {
 
     // 프라이빗 메시지 전송 확인
     socket.on('privateMessageSent', (messageData) => {
-        // 전송한 프라이빗 메시지는 항상 오른쪽에 표시
+        // 전송한 메시지는 항상 오른쪽에 표시
         addMessage(messageData, true);
+    });
+
+    // 프라이빗 방 초대 수신
+    socket.on('privateRoomInvite', (data) => {
+        // 초대 정보 저장
+        window.currentInviteRoomCode = data.roomCode;
+        window.currentInviterSocketId = data.inviterSocketId;
+        
+        showPrivateRoomInviteResponseModal(data.inviterUsername);
+        showToast(`${data.inviterUsername}님이 프라이빗 방에 초대했습니다.`, 'info');
+    });
+
+    // 프라이빗 방 초대 거절 알림
+    socket.on('privateRoomInviteRejected', (data) => {
+        showToast(`${data.targetUsername}님이 초대를 거절했습니다.`, 'info');
     });
 
     socket.on('privateRoomError', (error) => {
@@ -652,6 +706,11 @@ function showNearbyUsersModal() {
                 </div>
             `;
             
+            // 사용자 클릭 시 초대 모달 표시
+            userItem.addEventListener('click', () => {
+                showPrivateRoomInviteModal(user.username);
+            });
+            
             nearbyUsersList.appendChild(userItem);
         });
     }
@@ -961,6 +1020,83 @@ function closePrivateRoom() {
     currentRoomCode = null;
     hideTopNavigationBar();
     showToast('프라이빗 방이 삭제되었습니다.', 'info');
+}
+
+// ==================== 프라이빗 방 초대 관련 함수들 ====================
+
+// 프라이빗 방 초대 모달 표시
+function showPrivateRoomInviteModal(targetUsername) {
+    inviteTargetUsername.textContent = targetUsername;
+    privateRoomInviteModal.classList.add('active');
+    hideNearbyUsersModal(); // 근처 사용자 모달 닫기
+}
+
+// 프라이빗 방 초대 모달 숨기기
+function hidePrivateRoomInviteModal() {
+    privateRoomInviteModal.classList.remove('active');
+}
+
+// 프라이빗 방 초대 보내기
+function sendPrivateRoomInvite() {
+    const targetUsername = inviteTargetUsername.textContent;
+    
+    if (!hasPrivateRoomAccess || !currentRoomCode) {
+        // 프라이빗 방이 없으면 새로 생성
+        socket.emit('createPrivateRoom', {
+            latitude: currentUser.latitude,
+            longitude: currentUser.longitude
+        });
+        
+        // 초대할 사용자 정보 저장
+        window.pendingInvite = targetUsername;
+        
+        showToast('프라이빗 방을 생성하고 초대를 보내는 중...', 'info');
+    } else {
+        // 기존 프라이빗 방에 초대
+        socket.emit('inviteToPrivateRoom', {
+            roomCode: currentRoomCode,
+            targetUsername: targetUsername
+        });
+        
+        showToast(`${targetUsername}님에게 프라이빗 방 초대를 보냈습니다.`, 'success');
+    }
+    
+    hidePrivateRoomInviteModal();
+}
+
+// 프라이빗 방 초대 응답 모달 표시
+function showPrivateRoomInviteResponseModal(inviterUsername) {
+    inviterUsername.textContent = inviterUsername;
+    inviteMessage.textContent = '님이 프라이빗 방에 초대했습니다.';
+    privateRoomInviteResponseModal.classList.add('active');
+}
+
+// 프라이빗 방 초대 응답 모달 숨기기
+function hidePrivateRoomInviteResponseModal() {
+    privateRoomInviteResponseModal.classList.remove('active');
+}
+
+// 프라이빗 방 초대 응답
+function respondToPrivateRoomInvite(accept) {
+    if (accept) {
+        // 초대 수락 - 방에 참가
+        socket.emit('respondToPrivateRoomInvite', {
+            roomCode: window.currentInviteRoomCode,
+            inviterSocketId: window.currentInviterSocketId,
+            accept: true
+        });
+        showToast('프라이빗 방 초대를 수락했습니다.', 'success');
+    } else {
+        // 초대 거절
+        socket.emit('respondToPrivateRoomInvite', {
+            roomCode: window.currentInviteRoomCode,
+            inviterSocketId: window.currentInviterSocketId,
+            accept: false
+        });
+        showToast('프라이빗 방 초대를 거절했습니다.', 'info');
+    }
+    
+    hidePrivateRoomInviteResponseModal();
 }
 
 
