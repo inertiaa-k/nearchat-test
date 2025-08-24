@@ -746,7 +746,36 @@ io.on('connection', (socket) => {
 
     if (accept) {
       // 초대 수락 - 방에 참가
-      socket.emit('joinPrivateRoom', { roomCode: roomCode });
+      const room = privateRooms.get(roomCode);
+      if (!room) {
+        socket.emit('privateRoomError', { message: '존재하지 않는 방입니다.' });
+        return;
+      }
+
+      // 방에 사용자 추가
+      room.users.add(socket.id);
+      
+      // 소켓을 방에 참가시킴
+      socket.join(roomCode);
+      
+      // 방의 다른 사용자들에게 새 사용자 참가 알림
+      socket.to(roomCode).emit('userJoinedPrivateRoom', {
+        username: user.username,
+        socketId: socket.id
+      });
+      
+      // 방에 참가한 사용자에게 방 정보 전송
+      const roomUsers = Array.from(room.users).map(socketId => {
+        const roomUser = connectedUsers.get(socketId);
+        return roomUser ? roomUser.username : 'Unknown';
+      });
+      
+      socket.emit('privateRoomJoined', {
+        roomCode: roomCode,
+        users: roomUsers
+      });
+      
+      console.log(`${user.username}님이 프라이빗 방 ${roomCode}에 초대를 통해 참가했습니다.`);
     } else {
       // 초대 거절
       io.sockets.sockets.get(inviterSocketId)?.emit('privateRoomInviteRejected', {
