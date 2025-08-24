@@ -1,139 +1,118 @@
-# GPS 채팅 - 근처 사람들과 실시간 채팅 (자동 업데이트 테스트)
+# GPS CHAT
 
-GPS를 기반으로 근처 30m 내에 있는 사람들과 실시간으로 채팅할 수 있는 웹사이트입니다.
+GPS 기반 실시간 채팅 애플리케이션입니다. 근처 500m 내의 사용자들과 실시간으로 대화할 수 있습니다.
 
-## 🌟 주요 기능
+## 주요 기능
 
-- **실시간 위치 기반 채팅**: GPS를 사용하여 근처 30m 내의 사용자들과만 채팅
-- **실시간 메시지**: Socket.IO를 사용한 실시간 메시지 전송
-- **위치 추적**: 사용자의 위치 변화를 실시간으로 추적
-- **근처 사용자 목록**: 현재 근처에 있는 사용자들을 확인
-- **반응형 디자인**: 모바일과 데스크톱 모두 지원
-- **한국어 지원**: 완전한 한국어 인터페이스
+- 🌍 **GPS 기반 위치 서비스**: 근처 500m 내 사용자 검색
+- 💬 **실시간 채팅**: Socket.IO를 이용한 실시간 메시지 전송
+- 🔒 **프라이빗 채팅방**: 6자리 코드로 비공개 채팅방 생성/참가
+- 📱 **반응형 디자인**: 모바일과 데스크톱에서 모두 사용 가능
+- 📍 **위치 기반 필터링**: 근처 사용자만 메시지 수신
+- 🗳️ **방 삭제 투표**: 프라이빗 방 삭제 시 과반수 동의 필요
 
-## 🚀 기술 스택
+## 기술 스택
 
-- **Frontend**: HTML5, CSS3, JavaScript (Vanilla JS)
+- **Frontend**: HTML5, CSS3, JavaScript (ES6+)
 - **Backend**: Node.js, Express.js
-- **실시간 통신**: Socket.IO
-- **데이터베이스**: SQLite
-- **위치 서비스**: Geolocation API
+- **Real-time**: Socket.IO
+- **Database**: SQLite3
+- **Hosting**: Render
 
-## 📋 설치 및 실행
+## 로컬 개발 환경 설정
 
-### 1. 의존성 설치
+1. **저장소 클론**
+   ```bash
+   git clone <repository-url>
+   cd gps-chat
+   ```
 
-```bash
-npm install
-```
+2. **의존성 설치**
+   ```bash
+   npm install
+   ```
 
-### 2. 서버 실행
+3. **개발 서버 실행**
+   ```bash
+   npm run dev
+   ```
 
-```bash
-# 개발 모드 (자동 재시작)
-npm run dev
+4. **브라우저에서 접속**
+   ```
+   http://localhost:3000
+   ```
 
-# 프로덕션 모드
-npm start
-```
+## Render 배포 방법
 
-### 3. 브라우저에서 접속
+### 1. GitHub 저장소 준비
 
-```
-http://localhost:3000
-```
+1. 코드를 GitHub 저장소에 푸시합니다.
+2. 모든 파일이 올바르게 커밋되었는지 확인합니다.
 
-## 📱 사용법
+### 2. Render 계정 생성 및 서비스 연결
 
-### 1. 위치 권한 허용
-- 브라우저에서 위치 정보 접근 권한을 허용해주세요
-- 정확한 위치 기반 채팅을 위해 GPS 권한이 필요합니다
+1. [Render.com](https://render.com)에 가입합니다.
+2. "New +" 버튼을 클릭하고 "Web Service"를 선택합니다.
+3. GitHub 저장소를 연결합니다.
 
-### 2. 닉네임 입력
-- 원하는 닉네임을 입력하세요 (최대 20자)
+### 3. 서비스 설정
 
-### 3. 채팅 시작
-- "채팅 시작하기" 버튼을 클릭하여 채팅에 참가
+**기본 설정:**
+- **Name**: `gps-chat` (원하는 이름)
+- **Environment**: `Node`
+- **Region**: `Oregon (US West)` (가장 빠른 지역 선택)
+- **Branch**: `main` (또는 기본 브랜치)
 
-### 4. 메시지 전송
-- 하단의 입력창에 메시지를 입력하고 Enter 키를 누르거나 전송 버튼을 클릭
+**빌드 설정:**
+- **Build Command**: `npm install`
+- **Start Command**: `npm start`
 
-### 5. 근처 사용자 확인
-- 상단의 사용자 아이콘을 클릭하여 근처 사용자 목록을 확인
+**환경 변수:**
+- `NODE_ENV`: `production`
 
-## 🔧 주요 기능 설명
+### 4. 배포 완료
 
-### 위치 기반 필터링
-- 사용자의 현재 위치를 기준으로 30m 이내의 사용자들과만 채팅
-- 실시간으로 위치를 추적하여 사용자가 이동하면 자동으로 업데이트
+1. "Create Web Service"를 클릭합니다.
+2. 배포가 완료될 때까지 기다립니다 (약 2-3분).
+3. 제공된 URL로 접속하여 테스트합니다.
 
-### 실시간 통신
-- Socket.IO를 사용하여 실시간 메시지 전송
-- 사용자 참가/퇴장 알림
-- 위치 업데이트 알림
+## 환경 변수
 
-### 데이터 저장
-- SQLite 데이터베이스를 사용하여 사용자 정보와 메시지 저장
-- 최근 1시간 내의 메시지만 표시
+| 변수명 | 설명 | 기본값 |
+|--------|------|--------|
+| `PORT` | 서버 포트 | `3000` |
+| `NODE_ENV` | 실행 환경 | `development` |
 
-## 📁 프로젝트 구조
+## API 엔드포인트
 
-```
-GPS CHAT/
-├── server.js              # Express 서버 및 Socket.IO 설정
-├── package.json           # 프로젝트 의존성 및 스크립트
-├── public/                # 정적 파일들
-│   ├── index.html         # 메인 HTML 파일
-│   ├── styles.css         # CSS 스타일
-│   └── app.js            # 클라이언트 JavaScript
-├── chat.db               # SQLite 데이터베이스 (자동 생성)
-└── README.md             # 프로젝트 설명서
-```
+- `GET /` - 메인 페이지
+- `GET /health` - 헬스 체크
 
-## 🔒 보안 및 개인정보
+## Socket.IO 이벤트
 
-- 사용자의 실제 위치 정보는 서버에 저장되지만, 30m 이내의 사용자들과만 공유됩니다
-- 메시지는 최근 1시간 내의 것만 저장되며, 자동으로 삭제됩니다
-- 사용자가 채팅을 나가면 위치 정보가 즉시 삭제됩니다
+### 클라이언트 → 서버
+- `register` - 사용자 등록
+- `sendMessage` - 메시지 전송
+- `updateLocation` - 위치 업데이트
+- `createPrivateRoom` - 프라이빗 방 생성
+- `joinPrivateRoom` - 프라이빗 방 참가
+- `leavePrivateRoom` - 프라이빗 방 나가기
 
-## 🌐 브라우저 지원
+### 서버 → 클라이언트
+- `userJoined` - 새 사용자 입장 알림
+- `userLeft` - 사용자 퇴장 알림
+- `newMessage` - 새 메시지 수신
+- `nearbyUsers` - 근처 사용자 목록
 
-- Chrome 50+
-- Firefox 55+
-- Safari 10+
-- Edge 12+
-
-**참고**: HTTPS 환경에서만 위치 정보 접근이 가능합니다.
-
-## 🐛 문제 해결
-
-### 위치 정보를 가져올 수 없는 경우
-1. 브라우저의 위치 권한을 확인하세요
-2. HTTPS 환경에서 접속했는지 확인하세요
-3. GPS가 활성화되어 있는지 확인하세요
-
-### 메시지가 전송되지 않는 경우
-1. 인터넷 연결을 확인하세요
-2. 근처에 다른 사용자가 있는지 확인하세요
-3. 브라우저를 새로고침해보세요
-
-## 📝 라이선스
+## 라이선스
 
 MIT License
 
-## 🤝 기여하기
+## 기여하기
 
-1. 이 저장소를 포크하세요
-2. 새로운 기능 브랜치를 생성하세요 (`git checkout -b feature/AmazingFeature`)
-3. 변경사항을 커밋하세요 (`git commit -m 'Add some AmazingFeature'`)
-4. 브랜치에 푸시하세요 (`git push origin feature/AmazingFeature`)
-5. Pull Request를 생성하세요
-
-## 📞 문의
-
-프로젝트에 대한 문의사항이 있으시면 이슈를 생성해주세요.
-
----
-
-**GPS 채팅**으로 근처 사람들과 새로운 만남을 시작해보세요! 🗺️💬
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 

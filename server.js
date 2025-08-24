@@ -16,8 +16,9 @@ const io = socketIo(server, {
 });
 
 // 프라이빗 방 관련 변수
-const privateRooms = new Map(); // roomCode -> { users: Set, messages: Array, createdAt: Date }
+const privateRooms = new Map(); // roomCode -> { users: Set, messages: Array, createdAt: Date, creator: socketId }
 const userRooms = new Map(); // socketId -> roomCode
+const roomDeletionVotes = new Map(); // roomCode -> { votes: Set, requiredVotes: number, initiator: socketId }
 
 // Rate Limiting 관련 변수
 const messageLimits = new Map(); // socketId -> { count: number, lastReset: Date }
@@ -69,6 +70,19 @@ function checkRateLimit(socketId) {
   
   userLimit.count++;
   return true;
+}
+
+// 모든 사용자에게 근처 사용자 리스트 업데이트
+function updateAllUsersNearbyList() {
+  console.log('🔄 모든 사용자에게 근처 사용자 리스트 업데이트 중...');
+  
+  connectedUsers.forEach((user, socketId) => {
+    if (user.latitude && user.longitude) {
+      const nearbyUsers = findNearbyUsers(user.latitude, user.longitude, socketId);
+      io.to(socketId).emit('nearbyUsers', nearbyUsers);
+      console.log(`📋 ${user.username}에게 ${nearbyUsers.length}명의 근처 사용자 목록 업데이트`);
+    }
+  });
 }
 
 // 미들웨어 설정
@@ -126,7 +140,9 @@ app.get('/health', (req, res) => {
 // SQLite 데이터베이스 설정 (Render 환경 대응)
 let db;
 try {
-  db = new sqlite3.Database('chat.db', (err) => {
+  // Render에서는 임시 디렉토리 사용
+  const dbPath = process.env.NODE_ENV === 'production' ? '/tmp/chat.db' : './chat.db';
+  db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
       console.log('SQLite 데이터베이스 초기화 실패, 메모리 기반으로 전환:', err.message);
       db = null;
@@ -301,20 +317,27 @@ io.on('connection', (socket) => {
     // 새 사용자에게 최근 메시지 7개 전송
     if (db) {
       db.all(
-        'SELECT * FROM messages WHERE timestamp > datetime("now", "-1 hour") ORDER BY timestamp DESC LIMIT 7',
+        'SELECT * FROM messages WHERE timestamp > datetime("now", "-24 hours") ORDER BY timestamp DESC LIMIT 7',
         (err, rows) => {
           if (err) {
             console.log('최근 메시지 조회 오류:', err.message);
           } else {
-            // 위치 기반 필터링 (500m 이내)
+            // 위치 기반 필터링 (500m 이내) + 시간순 정렬
             const nearbyMessages = rows.filter(row => {
               const distance = calculateDistance(latitude, longitude, row.latitude, row.longitude);
               return distance <= 500;
             });
             
             if (nearbyMessages.length > 0) {
-              console.log(`📨 ${username}에게 최근 메시지 ${nearbyMessages.length}개 전송`);
-              socket.emit('recentMessages', nearbyMessages.reverse()); // 시간순으로 정렬
+              // senderName이 없는 메시지들은 필터링하고, 시간순으로 정렬 (오래된 메시지부터)
+              const validMessages = nearbyMessages.filter(m => m.senderName && m.senderName.trim() !== '');
+              const sortedMessages = validMessages.sort((a, b) => 
+                new Date(a.timestamp) - new Date(b.timestamp)
+              );
+              
+              console.log(`📨 ${username}에게 최근 메시지 ${sortedMessages.length}개 전송`);
+              console.log('📨 전송할 메시지들:', sortedMessages.map(m => ({ sender: m.senderName, message: m.message, timestamp: m.timestamp })));
+              socket.emit('recentMessages', sortedMessages);
             } else {
               console.log(`📨 ${username}에게 전송할 최근 메시지가 없습니다.`);
             }
@@ -326,6 +349,9 @@ io.on('connection', (socket) => {
     }
     
     console.log(`✅ ${username}님 등록 완료\n`);
+    
+    // 모든 기존 사용자에게 근처 사용자 리스트 업데이트
+    updateAllUsersNearbyList();
   });
 
   // 위치 업데이트
@@ -357,6 +383,9 @@ io.on('connection', (socket) => {
           distance: nearbyUser.distance
         });
       });
+      
+      // 모든 사용자에게 근처 사용자 리스트 업데이트
+      updateAllUsersNearbyList();
     }
   });
 
@@ -452,7 +481,77 @@ io.on('connection', (socket) => {
       connectedUsers.delete(socket.id);
       userRooms.delete(socket.id);
       console.log(`${user.username}님이 연결을 해제했습니다.`);
+      
+      // 모든 사용자에게 근처 사용자 리스트 업데이트
+      updateAllUsersNearbyList();
     }
+  });
+
+  // 프라이빗 방 생성
+  console.log('🔧 createPrivateRoom 이벤트 리스너 등록됨');
+  socket.on('createPrivateRoom', (data) => {
+    console.log('🔧 createPrivateRoom 이벤트 수신:', data);
+    const { roomCode, username, latitude, longitude } = data;
+    const user = connectedUsers.get(socket.id);
+    
+    if (!user) {
+      socket.emit('privateRoomError', { message: '사용자 정보를 찾을 수 없습니다.' });
+      return;
+    }
+
+    // 입력값 검증
+    if (!validateInput(roomCode, 6) || roomCode.length !== 6) {
+      socket.emit('privateRoomError', { message: '유효하지 않은 방 코드입니다.' });
+      return;
+    }
+
+    // 방 코드 형식 검증 (영문 대문자 + 숫자만)
+    if (!/^[A-Z0-9]{6}$/.test(roomCode)) {
+      socket.emit('privateRoomError', { message: '방 코드는 6자리 영문 대문자와 숫자만 가능합니다.' });
+      return;
+    }
+
+    // 이미 다른 프라이빗 방에 있는지 확인
+    if (userRooms.has(socket.id)) {
+      socket.emit('privateRoomError', { message: '이미 다른 프라이빗 방에 참가 중입니다.' });
+      return;
+    }
+
+    // 방이 이미 존재하는지 확인
+    if (privateRooms.has(roomCode)) {
+      socket.emit('privateRoomError', { message: '이미 존재하는 방 코드입니다.' });
+      return;
+    }
+
+    console.log(`🏠 프라이빗 방 생성: ${username} -> ${roomCode}`);
+
+    // 새 방 생성
+    privateRooms.set(roomCode, {
+      users: new Set(),
+      messages: [],
+      createdAt: new Date(),
+      creator: socket.id
+    });
+
+    const room = privateRooms.get(roomCode);
+    
+    // 생성자를 방에 추가
+    room.users.add(socket.id);
+    userRooms.set(socket.id, roomCode);
+    
+    // 소켓을 방에 조인
+    socket.join(roomCode);
+    
+    // 생성자에게 방 생성 성공 알림
+    socket.emit('privateRoomJoined', {
+      roomCode: roomCode,
+      users: Array.from(room.users).map(socketId => {
+        const roomUser = connectedUsers.get(socketId);
+        return roomUser ? { socketId, username: roomUser.username } : null;
+      }).filter(Boolean)
+    });
+
+    console.log(`✅ ${username}님이 프라이빗 방 ${roomCode}를 생성하고 입장했습니다.`);
   });
 
   // 프라이빗 방 참가
@@ -485,14 +584,10 @@ io.on('connection', (socket) => {
 
     console.log(`🔐 프라이빗 방 참가 요청: ${username} -> ${roomCode}`);
 
-    // 방이 존재하지 않으면 생성
+    // 방이 존재하지 않으면 에러 (기존 방만 참가 가능)
     if (!privateRooms.has(roomCode)) {
-      privateRooms.set(roomCode, {
-        users: new Set(),
-        messages: [],
-        createdAt: new Date()
-      });
-      console.log(`🏠 새로운 프라이빗 방 생성: ${roomCode}`);
+      socket.emit('privateRoomError', { message: '존재하지 않는 프라이빗 방입니다. 방 코드를 확인해주세요.' });
+      return;
     }
 
     const room = privateRooms.get(roomCode);
@@ -575,6 +670,9 @@ io.on('connection', (socket) => {
 
     // 방의 모든 사용자에게 메시지 전송
     io.to(roomCode).emit('newPrivateMessage', messageData);
+    
+    // 전송자에게 전송 확인 메시지 보내기
+    socket.emit('privateMessageSent', messageData);
 
     // 방의 메시지 히스토리에 저장
     const room = privateRooms.get(roomCode);
@@ -587,6 +685,118 @@ io.on('connection', (socket) => {
     }
 
     console.log(`✅ 프라이빗 메시지 전송 완료`);
+  });
+
+  // 프라이빗 방 삭제 투표 시작
+  socket.on('startRoomDeletionVote', (data) => {
+    const { roomCode } = data;
+    const user = connectedUsers.get(socket.id);
+    
+    if (!user) {
+      socket.emit('privateRoomError', { message: '사용자 정보를 찾을 수 없습니다.' });
+      return;
+    }
+
+    const room = privateRooms.get(roomCode);
+    if (!room) {
+      socket.emit('privateRoomError', { message: '존재하지 않는 방입니다.' });
+      return;
+    }
+
+    // 방에 있는 사용자만 투표 시작 가능
+    if (!room.users.has(socket.id)) {
+      socket.emit('privateRoomError', { message: '방에 참가하지 않은 사용자는 투표를 시작할 수 없습니다.' });
+      return;
+    }
+
+    // 이미 투표가 진행 중인지 확인
+    if (roomDeletionVotes.has(roomCode)) {
+      socket.emit('privateRoomError', { message: '이미 삭제 투표가 진행 중입니다.' });
+      return;
+    }
+
+    const totalUsers = room.users.size;
+    const requiredVotes = Math.ceil(totalUsers / 2); // 절반 이상
+
+    // 투표 시작
+    roomDeletionVotes.set(roomCode, {
+      votes: new Set(),
+      requiredVotes: requiredVotes,
+      initiator: socket.id
+    });
+
+    // 방의 모든 사용자에게 투표 시작 알림
+    io.to(roomCode).emit('roomDeletionVoteStarted', {
+      roomCode: roomCode,
+      initiator: user.username,
+      totalUsers: totalUsers,
+      requiredVotes: requiredVotes
+    });
+
+    console.log(`🗳️ 프라이빗 방 삭제 투표 시작: ${roomCode} (필요 투표: ${requiredVotes}/${totalUsers})`);
+  });
+
+  // 프라이빗 방 삭제 투표
+  socket.on('voteRoomDeletion', (data) => {
+    const { roomCode, vote } = data;
+    const user = connectedUsers.get(socket.id);
+    
+    if (!user) {
+      socket.emit('privateRoomError', { message: '사용자 정보를 찾을 수 없습니다.' });
+      return;
+    }
+
+    const voteData = roomDeletionVotes.get(roomCode);
+    if (!voteData) {
+      socket.emit('privateRoomError', { message: '진행 중인 삭제 투표가 없습니다.' });
+      return;
+    }
+
+    const room = privateRooms.get(roomCode);
+    if (!room || !room.users.has(socket.id)) {
+      socket.emit('privateRoomError', { message: '방에 참가하지 않은 사용자는 투표할 수 없습니다.' });
+      return;
+    }
+
+    if (vote === 'agree') {
+      voteData.votes.add(socket.id);
+      
+      // 투표 결과 확인
+      if (voteData.votes.size >= voteData.requiredVotes) {
+        // 투표 성공 - 방 삭제
+        console.log(`🗳️ 프라이빗 방 삭제 투표 성공: ${roomCode}`);
+        
+        // 방의 모든 사용자에게 삭제 알림
+        io.to(roomCode).emit('roomDeletionVotePassed', {
+          roomCode: roomCode,
+          totalVotes: voteData.votes.size,
+          requiredVotes: voteData.requiredVotes
+        });
+
+        // 모든 사용자를 방에서 내보내기
+        room.users.forEach(socketId => {
+          leavePrivateRoom(socketId, roomCode);
+        });
+
+        // 방과 투표 데이터 삭제
+        privateRooms.delete(roomCode);
+        roomDeletionVotes.delete(roomCode);
+      } else {
+        // 투표 진행 중
+        io.to(roomCode).emit('roomDeletionVoteUpdated', {
+          roomCode: roomCode,
+          currentVotes: voteData.votes.size,
+          requiredVotes: voteData.requiredVotes
+        });
+      }
+    } else if (vote === 'disagree') {
+      // 반대 투표 - 투표 취소
+      roomDeletionVotes.delete(roomCode);
+      io.to(roomCode).emit('roomDeletionVoteCancelled', {
+        roomCode: roomCode,
+        reason: '반대 투표로 인해 취소되었습니다.'
+      });
+    }
   });
 
   // 프라이빗 방 나가기
@@ -658,10 +868,9 @@ function leavePrivateRoom(socketId, roomCode) {
     roomCode: roomCode
   });
 
-  // 방이 비어있으면 방 삭제
+  // 방이 비어있어도 방은 유지 (다시 입장할 수 있도록)
   if (room.users.size === 0) {
-    privateRooms.delete(roomCode);
-    console.log(`🏠 프라이빗 방 ${roomCode}가 삭제되었습니다. (마지막 사용자 퇴장)`);
+    console.log(`🏠 프라이빗 방 ${roomCode}가 비어있습니다. (방은 유지됨)`);
   }
 
   console.log(`${user.username}님이 프라이빗 방 ${roomCode}에서 나갔습니다.`);
@@ -709,7 +918,7 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || '0.0.0.0';
+const HOST = '0.0.0.0';
 
 console.log('서버 시작 준비 중...');
 console.log(`PORT: ${PORT}`);

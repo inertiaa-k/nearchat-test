@@ -9,6 +9,7 @@ let nearbyUsers = [];
 let locationWatchId = null;
 let currentRoomCode = null;
 let isInPrivateRoom = false;
+let hasPrivateRoomAccess = false; // 프라이빗 방 접근 권한이 있는지 확인
 
 // DOM 요소들
 const loginScreen = document.getElementById('loginScreen');
@@ -43,6 +44,19 @@ const joinRoomBtn = document.getElementById('joinRoomBtn');
 const closeCreateModalBtn = document.getElementById('closeCreateModalBtn');
 const closeJoinModalBtn = document.getElementById('closeJoinModalBtn');
 
+// 상단 네비게이션 바 관련 DOM 요소들
+const topNavigationBar = document.getElementById('topNavigationBar');
+const navRoomCode = document.getElementById('navRoomCode');
+const quickEnterPrivateBtn = document.getElementById('quickEnterPrivateBtn');
+const closePrivateRoomBtn = document.getElementById('closePrivateRoomBtn');
+
+// 프라이빗 방 삭제 투표 관련 DOM 요소들
+const roomDeletionVoteModal = document.getElementById('roomDeletionVoteModal');
+const voteContent = document.getElementById('voteContent');
+const agreeVoteBtn = document.getElementById('agreeVoteBtn');
+const disagreeVoteBtn = document.getElementById('disagreeVoteBtn');
+const closeVoteModalBtn = document.getElementById('closeVoteModalBtn');
+
 
 
 // 초기화
@@ -58,6 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
 function initializeApp() {
     // Socket.IO 연결
     socket = io();
+    console.log('🔧 Socket.IO 연결 시도...');
     
     // Socket 이벤트 리스너 설정
     setupSocketListeners();
@@ -79,8 +94,13 @@ function setupEventListeners() {
     // 뒤로가기 버튼
     backBtn.addEventListener('click', () => {
         if (isInPrivateRoom) {
-            // 프라이빗 방에서 나가기
+            // 프라이빗 방에서 나가기 (접근 권한 유지)
             leavePrivateRoom();
+        } else if (hasPrivateRoomAccess && currentRoomCode) {
+            // 프라이빗 방에 접근 권한이 있지만 입장하지 않은 상태에서 뒤로가기
+            // 로그인 화면으로 돌아가기
+            showScreen(loginScreen);
+            disconnectFromChat();
         } else {
             // 로그인 화면으로 돌아가기
             showScreen(loginScreen);
@@ -143,13 +163,29 @@ function setupEventListeners() {
             joinPrivateRoom();
         }
     });
+    
+    // 상단 네비게이션 바 관련 이벤트 리스너
+    quickEnterPrivateBtn.addEventListener('click', quickEnterPrivateRoom);
+    closePrivateRoomBtn.addEventListener('click', startRoomDeletionVote);
+    
+    // 프라이빗 방 삭제 투표 관련 이벤트 리스너
+    agreeVoteBtn.addEventListener('click', () => voteRoomDeletion('agree'));
+    disagreeVoteBtn.addEventListener('click', () => voteRoomDeletion('disagree'));
+    closeVoteModalBtn.addEventListener('click', hideRoomDeletionVoteModal);
+    
+    // 투표 모달 외부 클릭 시 닫기
+    roomDeletionVoteModal.addEventListener('click', (e) => {
+        if (e.target === roomDeletionVoteModal) {
+            hideRoomDeletionVoteModal();
+        }
+    });
 }
 
 // Socket.IO 이벤트 리스너 설정
 function setupSocketListeners() {
     // 연결 성공
     socket.on('connect', () => {
-        console.log('서버에 연결되었습니다.');
+        console.log('🔧 서버에 연결되었습니다. Socket ID:', socket.id);
         showToast('서버에 연결되었습니다.', 'success');
     });
     
@@ -180,17 +216,22 @@ function setupSocketListeners() {
     
     // 새 메시지 수신
     socket.on('newMessage', (messageData) => {
-        addMessage(messageData, false);
+        // 전송자의 메시지는 messageSent 이벤트에서 처리하므로 여기서는 제외
+        if (messageData.senderName !== currentUser.username) {
+            addMessage(messageData, false);
+        }
     });
     
     // 메시지 전송 확인
     socket.on('messageSent', (messageData) => {
+        // 전송한 메시지는 항상 오른쪽에 표시
         addMessage(messageData, true);
     });
 
     // 최근 메시지 히스토리 수신
     socket.on('recentMessages', (messages) => {
-        console.log('최근 메시지 히스토리 수신:', messages.length + '개');
+        console.log('🔧 최근 메시지 히스토리 수신:', messages.length + '개');
+        console.log('🔧 메시지 데이터:', messages);
         
         // 기존 메시지 컨테이너 초기화
         messagesContainer.innerHTML = '';
@@ -205,11 +246,20 @@ function setupSocketListeners() {
                     <p>메시지를 입력하고 Enter를 누르거나 전송 버튼을 클릭하세요.</p>
                 </div>
             `;
+            console.log('🔧 환영 메시지 표시됨');
         } else {
-            // 최근 메시지들을 시간순으로 표시
-            messages.forEach(messageData => {
+            console.log('🔧 최근 메시지들을 표시 중...');
+            // 최근 메시지들을 시간순으로 표시 (별도 헤더 없이)
+            messages.forEach((messageData, index) => {
+                console.log(`🔧 메시지 ${index + 1}:`, messageData);
                 addMessage(messageData, messageData.senderName === currentUser.username);
             });
+            
+            // 스크롤을 맨 아래로
+            setTimeout(() => {
+                scrollToBottom();
+                console.log('🔧 스크롤을 맨 아래로 이동');
+            }, 100);
         }
     });
     
@@ -222,7 +272,9 @@ function setupSocketListeners() {
     socket.on('privateRoomJoined', (data) => {
         isInPrivateRoom = true;
         currentRoomCode = data.roomCode;
+        hasPrivateRoomAccess = true; // 프라이빗 방 접근 권한 설정
         updatePrivateRoomStatus();
+        showTopNavigationBar(); // 상단 네비게이션 바 표시
         
         // 기존 메시지 컨테이너 초기화
         messagesContainer.innerHTML = `
@@ -249,11 +301,61 @@ function setupSocketListeners() {
     });
 
     socket.on('newPrivateMessage', (messageData) => {
-        addMessage(messageData, false);
+        // 프라이빗 방에서도 메시지 발신자에 따라 올바른 위치에 표시
+        // 전송자의 메시지는 privateMessageSent 이벤트에서 처리하므로 여기서는 제외
+        if (messageData.senderName !== currentUser.username) {
+            addMessage(messageData, false);
+        }
+    });
+
+    // 프라이빗 메시지 전송 확인
+    socket.on('privateMessageSent', (messageData) => {
+        // 전송한 프라이빗 메시지는 항상 오른쪽에 표시
+        addMessage(messageData, true);
     });
 
     socket.on('privateRoomError', (error) => {
         showToast(error.message, 'error');
+    });
+
+    // 프라이빗 방 삭제 투표 관련 이벤트
+    socket.on('roomDeletionVoteStarted', (data) => {
+        showRoomDeletionVoteModal(data);
+        showToast(`${data.initiator}님이 방 삭제 투표를 시작했습니다.`, 'info');
+    });
+
+    socket.on('roomDeletionVoteUpdated', (data) => {
+        updateRoomDeletionVote(data);
+        showToast(`방 삭제 투표 진행 중: ${data.currentVotes}/${data.requiredVotes}`, 'info');
+    });
+
+    socket.on('roomDeletionVotePassed', (data) => {
+        hideRoomDeletionVoteModal();
+        showToast(`방 삭제 투표가 통과되었습니다. (${data.totalVotes}/${data.requiredVotes})`, 'success');
+        
+        // 모든 사용자가 방에서 나가도록 처리
+        if (isInPrivateRoom) {
+            isInPrivateRoom = false;
+            hasPrivateRoomAccess = false;
+            currentRoomCode = null;
+            updatePrivateRoomStatus();
+            hideTopNavigationBar();
+            
+            // 일반 채팅 화면으로 복원
+            messagesContainer.innerHTML = `
+                <div class="welcome-message">
+                    <i class="fas fa-hand-wave"></i>
+                    <h3>환영합니다!</h3>
+                    <p>근처 500m 내의 사람들과 대화를 시작하세요.</p>
+                    <p>메시지를 입력하고 Enter를 누르거나 전송 버튼을 클릭하세요.</p>
+                </div>
+            `;
+        }
+    });
+
+    socket.on('roomDeletionVoteCancelled', (data) => {
+        hideRoomDeletionVoteModal();
+        showToast(`방 삭제 투표가 취소되었습니다: ${data.reason}`, 'info');
     });
 
 
@@ -461,6 +563,8 @@ function validateInput(input, maxLength = 500) {
 
 // 메시지 추가
 function addMessage(messageData, isSent) {
+    console.log('🔧 addMessage 호출됨:', { messageData, isSent });
+    
     // 입력값 검증
     if (!validateInput(messageData.message) || !validateInput(messageData.senderName, 20)) {
         console.error('유효하지 않은 메시지 데이터:', messageData);
@@ -519,6 +623,15 @@ function addUserLeftMessage(username) {
 // 근처 사용자 수 업데이트
 function updateNearbyCount() {
     nearbyCount.textContent = nearbyUsers.length;
+    console.log('🔧 근처 사용자 수 업데이트:', nearbyUsers.length);
+    
+    // 근처 사용자가 있으면 배지에 애니메이션 효과 추가
+    if (nearbyUsers.length > 0) {
+        nearbyCount.style.animation = 'pulse 1s ease-in-out';
+        setTimeout(() => {
+            nearbyCount.style.animation = '';
+        }, 1000);
+    }
 }
 
 // 근처 사용자 모달 표시
@@ -627,12 +740,14 @@ function showCreatePrivateRoomModal() {
     generatedRoomCode.textContent = roomCode;
     currentRoomCode = roomCode;
     createPrivateRoomModal.classList.add('active');
+    showTopNavigationBar(); // 상단 네비게이션 바 표시
 }
 
 // 프라이빗 방 생성 모달 숨기기
 function hideCreatePrivateRoomModal() {
     createPrivateRoomModal.classList.remove('active');
-    currentRoomCode = null;
+    // currentRoomCode는 유지 (접근 권한 유지)
+    // hideTopNavigationBar() 제거 (접근 권한이 있으면 계속 표시)
 }
 
 // 프라이빗 방 참가 모달 표시
@@ -661,14 +776,23 @@ function copyRoomCode() {
 // 프라이빗 방 입장
 function enterPrivateRoom() {
     if (currentRoomCode) {
-        socket.emit('joinPrivateRoom', {
+        console.log('🔧 createPrivateRoom 이벤트 전송:', {
+            roomCode: currentRoomCode,
+            username: currentUser.username,
+            latitude: currentUser.latitude,
+            longitude: currentUser.longitude
+        });
+        
+        socket.emit('createPrivateRoom', {
             roomCode: currentRoomCode,
             username: currentUser.username,
             latitude: currentUser.latitude,
             longitude: currentUser.longitude
         });
         hideCreatePrivateRoomModal();
-        showToast('프라이빗 방에 입장했습니다.', 'success');
+        hasPrivateRoomAccess = true; // 프라이빗 방 접근 권한 설정
+        showTopNavigationBar(); // 상단 네비게이션 바 표시
+        showToast('프라이빗 방을 생성하고 입장했습니다.', 'success');
     }
 }
 
@@ -689,6 +813,7 @@ function joinPrivateRoom() {
     });
     
     hideJoinPrivateRoomModal();
+    hasPrivateRoomAccess = true; // 프라이빗 방 접근 권한 설정
     showToast('프라이빗 방 참가 요청을 보냈습니다.', 'info');
 }
 
@@ -706,13 +831,136 @@ function updatePrivateRoomStatus() {
             `;
             document.querySelector('.user-info').appendChild(indicator);
         }
+        
+        // 상단 네비게이션 바 표시
+        showTopNavigationBar();
+    } else if (hasPrivateRoomAccess && currentRoomCode) {
+        // 프라이빗 방에 접근 권한이 있지만 현재 입장하지 않은 상태
+        showTopNavigationBar();
     } else {
         // 프라이빗 방 표시 제거
         const indicator = document.querySelector('.private-room-indicator');
         if (indicator) {
             indicator.remove();
         }
+        
+        // 상단 네비게이션 바 숨기기
+        hideTopNavigationBar();
     }
+}
+
+// 상단 네비게이션 바 표시
+function showTopNavigationBar() {
+    if (currentRoomCode) {
+        navRoomCode.textContent = `프라이빗 방: ${currentRoomCode}`;
+        
+        // 현재 프라이빗 방에 입장해 있는지에 따라 버튼 텍스트 변경
+        const quickEnterBtn = document.getElementById('quickEnterPrivateBtn');
+        if (isInPrivateRoom) {
+            quickEnterBtn.innerHTML = '<i class="fas fa-users"></i> 전체방으로';
+            quickEnterBtn.disabled = false;
+            quickEnterBtn.style.opacity = '1';
+        } else {
+            quickEnterBtn.innerHTML = '<i class="fas fa-lock"></i> 프라이빗방으로';
+            quickEnterBtn.disabled = false;
+            quickEnterBtn.style.opacity = '1';
+        }
+        
+        topNavigationBar.style.display = 'block';
+        chatScreen.classList.add('has-top-nav');
+    }
+}
+
+// 상단 네비게이션 바 숨기기
+function hideTopNavigationBar() {
+    topNavigationBar.style.display = 'none';
+    chatScreen.classList.remove('has-top-nav');
+}
+
+// 빠른 프라이빗 방 입장/일반 채팅방으로 돌아가기
+function quickEnterPrivateRoom() {
+    if (isInPrivateRoom) {
+        // 프라이빗 방에서 일반 채팅방으로 돌아가기
+        leavePrivateRoom();
+    } else if (currentRoomCode && hasPrivateRoomAccess) {
+        // 일반 채팅방에서 프라이빗 방으로 입장
+        socket.emit('joinPrivateRoom', {
+            roomCode: currentRoomCode,
+            username: currentUser.username,
+            latitude: currentUser.latitude,
+            longitude: currentUser.longitude
+        });
+        showToast('프라이빗 방에 입장했습니다.', 'success');
+    }
+}
+
+// 프라이빗 방 삭제 투표 시작
+function startRoomDeletionVote() {
+    if (isInPrivateRoom && currentRoomCode) {
+        socket.emit('startRoomDeletionVote', { roomCode: currentRoomCode });
+        showToast('프라이빗 방 삭제 투표를 시작했습니다.', 'info');
+    } else {
+        // 프라이빗 방에 입장하지 않은 상태에서는 바로 삭제
+        closePrivateRoom();
+    }
+}
+
+// 프라이빗 방 삭제 투표
+function voteRoomDeletion(vote) {
+    if (currentRoomCode) {
+        socket.emit('voteRoomDeletion', { roomCode: currentRoomCode, vote: vote });
+        hideRoomDeletionVoteModal();
+        
+        if (vote === 'agree') {
+            showToast('방 삭제에 동의했습니다.', 'info');
+        } else {
+            showToast('방 삭제에 반대했습니다.', 'info');
+        }
+    }
+}
+
+// 투표 모달 표시
+function showRoomDeletionVoteModal(data) {
+    voteContent.innerHTML = `
+        <h4>프라이빗 방 삭제 투표</h4>
+        <p><strong>${data.initiator}</strong>님이 프라이빗 방 삭제를 제안했습니다.</p>
+        <div class="vote-info">
+            <p><strong>총 참가자:</strong> ${data.totalUsers}명</p>
+            <p><strong>필요 동의:</strong> ${data.requiredVotes}명 이상</p>
+        </div>
+        <p>방 삭제에 동의하시겠습니까?</p>
+    `;
+    roomDeletionVoteModal.classList.add('active');
+}
+
+// 투표 모달 숨기기
+function hideRoomDeletionVoteModal() {
+    roomDeletionVoteModal.classList.remove('active');
+}
+
+// 투표 진행 상황 업데이트
+function updateRoomDeletionVote(data) {
+    voteContent.innerHTML = `
+        <h4>프라이빗 방 삭제 투표 진행 중</h4>
+        <div class="vote-info">
+            <p><strong>현재 동의:</strong> ${data.currentVotes}명</p>
+            <p><strong>필요 동의:</strong> ${data.requiredVotes}명</p>
+        </div>
+        <p>투표가 진행 중입니다...</p>
+    `;
+}
+
+// 프라이빗 방 닫기 (개인 삭제)
+function closePrivateRoom() {
+    if (isInPrivateRoom) {
+        leavePrivateRoom();
+    }
+    
+    // 프라이빗 방 접근 권한 완전 삭제
+    hasPrivateRoomAccess = false;
+    currentRoomCode = null;
+    hideTopNavigationBar();
+    showToast('프라이빗 방이 삭제되었습니다.', 'info');
 }
 
 
@@ -722,7 +970,7 @@ function leavePrivateRoom() {
     if (isInPrivateRoom) {
         socket.emit('leavePrivateRoom', { roomCode: currentRoomCode });
         isInPrivateRoom = false;
-        currentRoomCode = null;
+        // currentRoomCode와 hasPrivateRoomAccess는 유지 (접근 권한 유지)
         updatePrivateRoomStatus();
         
         // 일반 채팅 화면으로 복원
@@ -735,6 +983,6 @@ function leavePrivateRoom() {
             </div>
         `;
         
-        showToast('일반 채팅방으로 돌아왔습니다.', 'info');
+        showToast('일반 채팅방으로 돌아왔습니다. 상단 버튼으로 프라이빗 방에 다시 입장할 수 있습니다.', 'info');
     }
 }
